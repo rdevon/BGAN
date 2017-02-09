@@ -28,6 +28,13 @@ def alt_gen_cost(F, cells=None):
     
     return -log_p.mean()
 
+def gen_cost(F, cells=None):
+    d_name, = cells
+    D_cell = manager.cells[d_name]
+    log_py_h1 = -D_cell.neg_log_prob(1., P=F)
+    
+    return -log_py_h1.mean()
+
 def reweighted_MLE(G_samples=None, cells=None):
     d_name, = cells
     D_cell = manager.cells[d_name]
@@ -50,7 +57,7 @@ def reweighted_MLE(G_samples=None, cells=None):
     #cost = (w_tilde * (log_dd - log_w_sum + log_N)).sum(0)
     #cost = (w_tilde * log_dd.shape[0] - 1).sum()
     #cost = -log_w_tilde.mean()
-    scale = -w_tilde * (log_N + log_w_tilde - 1.)
+    scale = w_tilde * (log_N + log_w_tilde + 1.)
     constants = [scale]
     cost = (scale * log_w_tilde).mean()
     
@@ -69,8 +76,45 @@ def reweighted_MLE(G_samples=None, cells=None):
                        ess=ess, log_ess=log_ess,
                        constants=constants)
 
-def main(batch_size=None, dim_z=None, GAN_type=None, freq=1,
-         learning_rate=0.0001, optimizer='rmsprop', test=False):
+def build_normal_GAN():
+    cortex.add_step('discriminator._cost', P='fake.P', X=0.,
+                    name='fake_cost')
+    cortex.add_step('discriminator._cost', P='real.P', X=1.,
+                    name='real_cost')
+
+    cortex.build()
+    
+    cortex.add_cost(
+        lambda x, y: x + y, 'fake_cost.output', 'real_cost.output',
+        name='discriminator_cost')
+    
+    m = 0
+    if m == 0:
+        cortex.add_cost(gen_cost, F='fake.P',
+                        cells=['discriminator'],
+                        name='generator_cost')
+    elif m == 1:    
+        cortex.add_cost(alt_gen_cost, F='fake.P',
+                        cells=['discriminator'],
+                        name='generator_cost')
+    elif m == 2:
+        cortex.add_cost(
+            reweighted_MLE, G_samples='generator.output',
+            cells=['discriminator'], name='generator_cost')
+
+    cortex.add_stat('basic_stats', 'fake.P', name='fake_rate')
+    cortex.add_stat('basic_stats', 'real.P', name='real_rate')
+
+def build_wasserstein_GAN():
+    cortex.build()
+    cortex.add_cost(wasserman_cost_d, 'real.output', 'fake.output',
+                    name='discriminator_cost')
+    cortex.add_cost(wasserman_cost_g, 'fake.output',
+                    name='generator_cost')
+
+
+def main(batch_size=None, dim_z=None, GAN_type=None, freq=5,
+         learning_rate=0.001, optimizer='rmsprop', test=False):
     cortex.set_path('HGAN')
     '''
     cortex.prepare_data('euclidean', name='data', method_args=dict(N=2),
@@ -85,64 +129,50 @@ def main(batch_size=None, dim_z=None, GAN_type=None, freq=1,
     cortex.prepare_cell('gaussian', name='noise', dim=dim_z)
     
     d_args = dict(
-        dim_hs=[500, 200],
+        dim_hs=[200],
         h_act='softplus',
-        name='discriminator'
+        name='discriminator',
+        dropout=0.1
     )
     if GAN_type is None:
         cortex.prepare_cell('DistributionMLP', distribution_type='binomial',
-                            dim=1, dropout=0.2, **d_args)
+                            dim=1, **d_args)
     elif GAN_type.lower() == 'wasserstein':
-        cortex.prepare_cell('MLP', dim_out=1, out_act='identity', **d_args)
+        cortex.prepare_cell('MLP', dim_out=1, out_act='identity', **d_args)        
+    else:
+        raise
         
     g_args = dict(
         h_act='softplus',
         out_act='sigmoid',
-        dim_hs=[500, 500],
+        dim_hs=[300, 500],
         batch_normalization=True,
         name='generator'
     )
     cortex.prepare_cell('MLP', **g_args)
     
     cortex.add_step('discriminator', 'data.input', name='real')
+    
     cortex.prepare_samples('noise', batch_size)
     cortex.add_step('generator', 'noise.samples')
     cortex.add_step('discriminator', 'generator.output', name='fake')
     
     if GAN_type is None:
-        cortex.add_step('discriminator._cost', P='fake.P', X=0.,
-                        name='fake_cost')
-        cortex.add_step('discriminator._cost', P='real.P', X=1.,
-                        name='real_cost')
-
-        cortex.build()
-        
-        cortex.add_cost(
-            lambda x, y: x + y, 'fake_cost.output', 'real_cost.output',
-            name='discriminator_cost')
-        
-        m = 2
-        if m == 0:
-            cortex.add_cost('discriminator.negative_log_likelihood',
-                            X=1., P='fake.P', name='generator_cost')
-        elif m == 1:    
-            cortex.add_cost(alt_gen_cost, F='fake.P',
-                            cells=['discriminator'],
-                            name='generator_cost')
-        elif m == 2:
-            cortex.add_cost(
-                reweighted_MLE, G_samples='generator.output',
-                cells=['discriminator'], name='generator_cost')
-
-        cortex.add_stat('basic_stats', 'fake.P', name='fake_rate')
-        cortex.add_stat('basic_stats', 'real.P', name='real_rate')
+        build_normal_GAN()
+        optimizer_args = {}
         
     elif GAN_type.lower() == 'wasserstein':
-        cortex.build()
-        cortex.add_cost(wasserman_cost_d, 'real.output', 'fake.output',
-                        name='discriminator_cost')
-        cortex.add_cost(wasserman_cost_g, 'fake.output',
-                        name='generator_cost')
+        build_wasserstein_GAN()
+        clip = 0.01
+        optimizer_args = {}
+        '''
+            'clips': {'discriminator.weights[0]_grad': clip,
+                      'discriminator.weights[1]_grad': clip,
+                      'discriminator.weights[2]_grad': clip}
+        }
+        '''
+    else:
+        raise
     
     train_session = cortex.create_session()
     cortex.build_session()
@@ -154,15 +184,6 @@ def main(batch_size=None, dim_z=None, GAN_type=None, freq=1,
         learning_rate=learning_rate,
         batch_size=batch_size,
     )
-    
-    if GAN_type is None:
-        optimizer_args = {}
-    elif GAN_type.lower() == 'wasserstein':
-        optimizer_args = {
-            'clips': {'discriminator.weights[0]_grad': 0.01,
-                      'discriminator.weights[1]_grad': 0.01,
-                      'discriminator.weights[2]_grad': 0.01}
-        }
         
     trainer.set_optimizer(
         ['discriminator', 'discriminator_cost'], optimizer_args=optimizer_args)
@@ -172,8 +193,7 @@ def main(batch_size=None, dim_z=None, GAN_type=None, freq=1,
     valid_session = cortex.create_session(noise=False)
     cortex.build_session()
     
-    evaluator = cortex.setup_evaluator(valid_session, valid_stat='total_cost')
-    
+    evaluator = cortex.setup_evaluator(valid_session, valid_stat='total_cost')    
     monitor = cortex.setup_monitor(valid_session, modes=['train', 'valid'])
     
     visualizer = cortex.setup_visualizer(train_session, batch_size=batch_size)
@@ -189,8 +209,8 @@ def main(batch_size=None, dim_z=None, GAN_type=None, freq=1,
 
 if __name__ == '__main__':
     parser = make_argument_parser()
-    parser.add_argument('-b', '--batch_size', type=int, default=100)
-    parser.add_argument('-d', '--dim_z', type=int, default=500)
+    parser.add_argument('-b', '--batch_size', type=int, default=1000)
+    parser.add_argument('-d', '--dim_z', type=int, default=200)
 
     args = parser.parse_args()
     kwargs = set_experiment(args)
