@@ -59,18 +59,15 @@ def reweighted_MLE(G_samples=None, cells=None):
     #constants = [w_tilde]
     
     baseline_out = B_cell(log_w)
-    #sum_x 1 / Z g(x | z) (d / 1 - d) [log w - log Z]
     
-    #scale = (w_tilde * (log_w + 1.)).copy()
+    #scale = (w_tilde * (log_w + 1)).copy()
     #scale = (w_tilde * (log_w - baseline_out['X_c'] + 1)).copy()
-    #scale = -w_tilde
     #scale = -log_w.copy()
-    #cost = (scale * (log_d1 + log_d0)).sum(axis=0).mean()
-    cost = 0.5 * (log_w ** 2).mean()
-    constants = [w_tilde, log_Z_est]
+    #cost = (scale * log_w).sum(0).mean()
+    #constants = [scale, w_tilde, log_Z_est]
     
-    #cost = (w_tilde * (log_w - log_Z_est)).sum()
-    #constants = [w_tilde, log_Z_est]
+    cost = 0.1 * (log_w ** 2).mean()
+    constants = [w_tilde, log_Z_est]
     #cost = -log_w_tilde.mean()
     #scale = w_tilde * (log_N + log_w_tilde + 1.)
     #constants = [scale]
@@ -135,31 +132,31 @@ def build_wasserstein_GAN():
 
 def main(batch_size=None, dim_z=None, GAN_type=None, freq=5,
          learning_rate=0.0001, optimizer='rmsprop', test=False):
-    cortex.set_path('HGAN')
+    cortex.set_path('RW_GAN_CIFAR')
     '''
     cortex.prepare_data('euclidean', name='data', method_args=dict(N=2),
                         n_samples=10000, method='modes', mode='train')
     cortex.prepare_data('euclidean', name='data', method_args=dict(N=2),
                         n_samples=10000, method='modes', mode='valid')
     '''
-    source = '$data/basic/mnist.pkl.gz'
-    cortex.prepare_data('MNIST', mode='train', name='data', source=source)
-    cortex.prepare_data('MNIST', mode='valid', name='data', source=source)
+    source = '$data/basic/cifar-10-batches-py'
+    cortex.prepare_data('CIFAR', mode='train', name='data', source=source)
+    cortex.prepare_data('CIFAR', mode='valid', name='data', source=source)
     cortex.prepare_cell('gaussian', name='noise', dim=dim_z)
     
-    filters = 1
+    filters = 3
         
-    cortex.prepare_cell('RCNN2D', input_shape=(256, 5, 5),
-        filter_shapes=((5, 5), (4, 4), (4, 4)),
+    cortex.prepare_cell('RCNN2D', input_shape=(256, 7, 7),
+        filter_shapes=((4, 4), (4, 4), (4, 4)),
         strides=((1, 1), (2, 2), (2, 2)),
         pads=((1, 1), (1, 1), (1, 1)),
         n_filters=[128, 64, filters], h_act='softplus', dim_in=dim_z,
-        batch_normalization=True, name='generator', out_act='sigmoid')
+        batch_normalization=True, name='generator', out_act='identity')
     
     discriminator = dict(
         cell_type='CNN2D',
         input_shape=cortex._manager.datasets['data']['image_shape'],
-        filter_shapes=((4, 4), (4, 4), (5, 5)),
+        filter_shapes=((4, 4), (4, 4), (4, 4)),
         strides=((2, 2), (2, 2), (1, 1)),
         pads=((1, 1), (1, 1), (1, 1)),
         n_filters=[64, 128, 256], dim_out=1, h_act='softplus',
@@ -215,7 +212,7 @@ def main(batch_size=None, dim_z=None, GAN_type=None, freq=5,
                    X='data.input',
                    name='real')
     
-    cortex.train(monitor_grads=False, eval_every=5)
+    cortex.train(monitor_grads=False, eval_every=10)
     
 
 if __name__ == '__main__':
