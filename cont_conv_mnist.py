@@ -35,14 +35,22 @@ def gen_cost(F, cells=None):
     
     return -log_py_h1.mean()
 
+def disc_cost(R, F, cells=None):
+    d_name, = cells
+    D_cell = manager.cells[d_name]
+    real_cost = D_cell.neg_log_prob(1., P=T.clip(R, 1e-7, 1 - 1e-7)).mean()
+    fake_cost = D_cell.neg_log_prob(0., P=T.clip(F, 1e-7, 1 - 1e-7)).mean()
+    return OrderedDict(real_cost=real_cost, fake_cost=fake_cost,
+                       cost=real_cost+fake_cost)
+
 def reweighted_MLE(G_samples=None, cells=None):
     d_name, b_name = cells
     D_cell = manager.cells[d_name]
     B_cell = manager.cells[b_name]
     d = D_cell(G_samples)['P']
     
-    log_d1 = T.log(d) #-D_cell.neg_log_prob(1., P=d)
-    log_d0 = T.log(1. - d)#-D_cell.neg_log_prob(0., P=d)
+    log_d1 = -D_cell.neg_log_prob(1., P=d)
+    log_d0 = -D_cell.neg_log_prob(0., P=d)
     log_w = log_d1 - log_d0
     
     # Find normalized weights.
@@ -66,8 +74,9 @@ def reweighted_MLE(G_samples=None, cells=None):
     #scale = -w_tilde
     #scale = -log_w.copy()
     #cost = (scale * (log_d1 + log_d0)).sum(axis=0).mean()
-    cost = 0.5 * (log_w ** 2).mean()
-    constants = [w_tilde, log_Z_est]
+    #cost = 0.5 * (log_w ** 2).mean()
+    cost = ((log_w - T.maximum(log_Z_est, -2)) ** 2).mean()
+    constants = [log_Z_est]
     
     #cost = (w_tilde * (log_w - log_Z_est)).sum()
     #constants = [w_tilde, log_Z_est]
@@ -95,15 +104,18 @@ def reweighted_MLE(G_samples=None, cells=None):
                        updates=baseline_out['updates'])
 
 def build_normal_GAN():
+    '''
     cortex.add_step('discriminator._cost', P='fake.P', X=0.,
                     name='fake_cost')
     cortex.add_step('discriminator._cost', P='real.P', X=1.,
                     name='real_cost')
+    '''
 
     cortex.build()
     
     cortex.add_cost(
-        lambda x, y: x + y, 'fake_cost.output', 'real_cost.output',
+        disc_cost, 'real.P', 'fake.P',
+        cells=['discriminator'],
         name='discriminator_cost')
     
     m = 2
@@ -190,7 +202,7 @@ def main(batch_size=None, dim_z=None, GAN_type=None, freq=5,
         optimizer=optimizer,
         epochs=10000,
         learning_rate=learning_rate,
-        learning_rate_decay=.99,
+        learning_rate_decay=.95,
         batch_size=batch_size,
     )
         

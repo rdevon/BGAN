@@ -41,8 +41,8 @@ def reweighted_MLE(G_samples=None, cells=None):
     B_cell = manager.cells[b_name]
     d = D_cell(G_samples)['P']
     
-    log_d1 = T.log(d) #-D_cell.neg_log_prob(1., P=d)
-    log_d0 = T.log(1. - d)#-D_cell.neg_log_prob(0., P=d)
+    log_d1 = -D_cell.neg_log_prob(1., P=d)
+    log_d0 = -D_cell.neg_log_prob(0., P=d)
     log_w = log_d1 - log_d0
     
     # Find normalized weights.
@@ -146,11 +146,11 @@ def main(batch_size=None, dim_z=None, GAN_type=None, freq=5,
     
     filters = 3
         
-    cortex.prepare_cell('RCNN2D', input_shape=(256, 7, 7),
+    cortex.prepare_cell('RCNN2D', input_shape=(1028, 7, 7),
         filter_shapes=((4, 4), (4, 4), (4, 4)),
         strides=((1, 1), (2, 2), (2, 2)),
         pads=((1, 1), (1, 1), (1, 1)),
-        n_filters=[128, 64, filters], h_act='softplus', dim_in=dim_z,
+        n_filters=[512, 256, filters], h_act='softplus', dim_in=dim_z,
         batch_normalization=True, name='generator', out_act='identity')
     
     discriminator = dict(
@@ -159,8 +159,8 @@ def main(batch_size=None, dim_z=None, GAN_type=None, freq=5,
         filter_shapes=((4, 4), (4, 4), (4, 4)),
         strides=((2, 2), (2, 2), (1, 1)),
         pads=((1, 1), (1, 1), (1, 1)),
-        n_filters=[64, 128, 256], dim_out=1, h_act='softplus',
-        batch_normalization=False)
+        n_filters=[128, 256, 1028], dim_out=1, h_act='softplus',
+        batch_normalization=True)
     
     cortex.prepare_cell('DistributionMLP', name='discriminator',
                         mlp=discriminator,
