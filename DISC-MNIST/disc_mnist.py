@@ -194,7 +194,7 @@ def reweighted_loss(fake_out):
 def main(num_epochs=40, n_samples=20, initial_eta=0.0001):
     # Load the dataset
     print("Loading data...")
-    source = "/home/devon/Data/basic/mnist.pkl.gz"
+    source = "/home/devon/Data/basic/mnist_binarized_salakhutdinov.pkl.gz"
     X_train= load_dataset(source=source, mode="train")
 
     # Prepare Theano variables for inputs and targets
@@ -228,10 +228,10 @@ def main(num_epochs=40, n_samples=20, initial_eta=0.0001):
     fake_out_ = T.clip(fake_out, 1e-7, 1 - 1e-7).reshape((n_samples, batch_size))
     
     log_d1 = -T.nnet.softplus(-fake_out_)  # -D_cell.neg_log_prob(1., P=d)
-    log_d0 = -(fake_out+T.nnet.softplus(-fake_out_))  # -D_cell.neg_log_prob(0., P=d)
+    log_d0 = -(fake_out_ + T.nnet.softplus(-fake_out_))  # -D_cell.neg_log_prob(0., P=d)
     log_w = log_d1 - log_d0
     g_output_ = T.shape_padleft(T.clip(g_output, 1e-7, 1 - 1e-7))
-    log_g = (samples * T.log(g_output_) + (1 - samples) * T.log(1 - g_output_)).sum(axis=(2, 3, 4))
+    log_g = (samples * T.log(g_output_) + (1. - samples) * T.log(1 - g_output_)).sum(axis=(2, 3, 4))
 
     # Find normalized weights.
     log_N = T.log(log_w.shape[0]).astype(floatX)
