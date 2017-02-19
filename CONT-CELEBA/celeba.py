@@ -229,8 +229,8 @@ def train(num_epochs,
     # Load the dataset
     log_file = open(filename, 'w')
     print("Loading data...")
-    print("Testing DCGAN + modified Loss...")
-    log_file.write("Testing DCGAN + modified Loss...\n")
+    print("Testing RW_DCGAN ...")
+    log_file.write("Testing RW_DCGAN...\n")
     log_file.write("Loading data...\n")
     log_file.write("Num_epochs: {}, disc_lr: {}, gen_lr: {}\n".format(num_epochs,
                                                                       disc_lr,
@@ -292,11 +292,10 @@ def train(num_epochs,
     print("Starting training of GAN...")
     log_file.write("Starting training of GAN...\n")
     log_file.flush()
-    for batch in test_stream.get_epoch_iterator():
-        X_test = transform(np.array(batch[0], dtype=np.float32)) # for reconstruction samples
     # We iterate over epochs:
     for epoch in range(num_epochs):
         # In each epoch, we do a full pass over the training data:
+        print("Epoch: ", epoch)
         train_err = 0
         train_batches = 0
         start_time = time.time()
@@ -309,6 +308,7 @@ def train(num_epochs,
                 print("{} batches for Epoch {} took {:.3f}s".format(
                     train_batches, epoch + 1, time.time() - start_time))
                 print("  training loss:\t\t{}".format(train_err / train_batches))
+
         # Then we print the results for this epoch:
         print("Total Epoch {} of {} took {:.3f}s".format(
             epoch + 1, num_epochs, time.time() - start_time))
@@ -317,6 +317,7 @@ def train(num_epochs,
         print("  training loss:\t\t{}".format(train_err / train_batches))
         log_file.write("  training loss:\t{}\n".format(train_err / train_batches))
         log_file.flush()
+
         # And finally, we plot some generated data
         prefix = "ep_{}".format(epoch)
         samples = gen_fn(lasagne.utils.floatX(np.random.rand(5000, 200)))
