@@ -1,0 +1,329 @@
+\documentclass[10pt]{article}
+
+\usepackage[top=.75in, bottom=.75in, left=.75in, right=.75in]{geometry}
+\usepackage{natbib}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{color}
+\usepackage{comment}
+\usepackage{fancyvrb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{latexsym}
+\usepackage{listings}
+\usepackage{multicol}
+\usepackage{multirow}
+\usepackage[normalem]{ulem}
+\usepackage{tabularx}
+\usepackage{times}
+\usepackage{url}
+\usepackage[utf8]{inputenc}
+\usepackage{xspace}
+\usepackage{wrapfig}
+\usepackage[]{units}
+\usepackage{subfig}
+\captionsetup[subfigure]{labelformat=empty}
+
+\setlength{\columnsep}{.5in}
+
+\newcommand{\obs}{\text{obs}}
+\newcommand{\mis}{\text{mis}}
+
+\newcommand{\qt}[1]{\left<#1\right>}
+\newcommand{\ql}[1]{\left[#1\right]}
+\newcommand{\hess}{\mathbf{H}}
+\newcommand{\jacob}{\mathbf{J}}
+\newcommand{\hl}{HL}
+\newcommand{\cost}{\mathcal{L}}
+\newcommand{\lout}{\mathbf{r}}
+\newcommand{\louti}{r}
+\newcommand{\outi}{y}
+\newcommand{\out}{\mathbf{y}}
+\newcommand{\gauss}{\mathbf{G_N}}
+\newcommand{\eye}{\mathbf{I}}
+\newcommand{\softmax}{\phi}
+\newcommand{\targ}{\mathbf{t}}
+\newcommand{\metric}{\mathbf{G}}
+\newcommand{\sample}{\mathbf{z}}
+\newcommand{\f}{\text{f}}
+
+\newcommand{\bmx}[0]{\begin{bmatrix}}
+\newcommand{\emx}[0]{\end{bmatrix}}
+\newcommand{\qexp}[1]{\left<#1\right>}
+\newcommand{\vect}[1]{\mathbf{#1}}
+\newcommand{\vects}[1]{\boldsymbol{#1}}
+\newcommand{\matr}[1]{\mathbf{#1}}
+\newcommand{\var}[0]{\operatorname{Var}}
+\newcommand{\std}[0]{\operatorname{std}}
+\newcommand{\cov}[0]{\operatorname{Cov}}
+\newcommand{\diag}[0]{\operatorname{diag}}
+\newcommand{\matrs}[1]{\boldsymbol{#1}}
+\newcommand{\va}[0]{\vect{a}}
+\newcommand{\vb}[0]{\vect{b}}
+\newcommand{\vc}[0]{\vect{c}}
+\newcommand{\ve}[0]{\vect{e}}
+\newcommand{\vn}[0]{\vect{n}}
+\newcommand{\vh}[0]{\vect{h}}
+\newcommand{\vv}[0]{\vect{v}}
+\newcommand{\vx}[0]{\vect{x}}
+\newcommand{\vz}[0]{\vect{z}}
+\newcommand{\vw}[0]{\vect{w}}
+\newcommand{\vs}[0]{\vect{s}}
+\newcommand{\vf}[0]{\vect{f}}
+\newcommand{\vi}[0]{\vect{i}}
+\newcommand{\vo}[0]{\vect{o}}
+\newcommand{\vy}[0]{\vect{y}}
+\newcommand{\vg}[0]{\vect{g}}
+\newcommand{\vm}[0]{\vect{m}}
+\newcommand{\vu}[0]{\vect{u}}
+\newcommand{\vL}[0]{\vect{L}}
+\newcommand{\vr}[0]{\vect{r}}
+\newcommand{\vp}[0]{\vect{p}}
+
+\newcommand{\mW}[0]{\matr{W}}
+\newcommand{\mP}[0]{\matr{P}}
+\newcommand{\mM}[0]{\matr{M}}
+\newcommand{\mE}[0]{\matr{E}}
+\newcommand{\mG}[0]{\matr{G}}
+\newcommand{\mX}[0]{\matr{X}}
+\newcommand{\mQ}[0]{\matr{Q}}
+\newcommand{\mU}[0]{\matr{U}}
+\newcommand{\mF}[0]{\matr{F}}
+\newcommand{\mV}[0]{\matr{V}}
+\newcommand{\mA}{\matr{A}}
+\newcommand{\mC}{\matr{C}}
+\newcommand{\mD}{\matr{D}}
+\newcommand{\mS}{\matr{S}}
+\newcommand{\mI}{\matr{I}}
+
+\newcommand{\td}[0]{\text{d}}
+\newcommand{\TT}[0]{\vects{\theta}}
+\newcommand{\PP}[0]{\vects{\phi}}
+\newcommand{\PS}[0]{\vects{\psi}}
+\newcommand{\vsig}[0]{\vects{\sigma}}
+\newcommand{\valpha}[0]{\vects{\alpha}}
+\newcommand{\vmu}[0]{\vects{\mu}}
+\newcommand{\vsigma}[0]{\vects{\sigma}}
+\newcommand{\vepsilon}[0]{\vects{\epsilon}}
+\newcommand{\vzero}[0]{\vect{0}}
+\newcommand{\tf}[0]{\text{m}}
+\newcommand{\tdf}[0]{\text{dm}}
+\newcommand{\grad}[0]{\nabla}
+\newcommand{\alert}[1]{\textcolor{red}{#1}}
+\newcommand{\N}[0]{\mathcal{N}}
+\newcommand{\LL}[0]{\mathcal{L}}
+\newcommand{\HH}[0]{\mathcal{H}}
+\newcommand{\NN}[0]{\mathcal{N}}
+\newcommand{\RR}[0]{\mathbb{R}}
+\newcommand{\II}[0]{\mathbb{I}}
+\newcommand{\Scal}[0]{\mathcal{S}}
+\newcommand{\sigmoid}{\text{sigmoid}}
+\newcommand{\Bernoulli}{\text{Bernoulli}}
+\newcommand{\E}[0]{\mathbb{E}}
+\newcommand{\enabla}[0]{\ensuremath{%
+    \overset{\raisebox{-0.3ex}[0.5ex][0ex]{%
+    \ensuremath{\scriptscriptstyle e}}}{\nabla}}}
+\newcommand{\enhnabla}[0]{\nabla_{\hspace{-0.5mm}e}\,}
+
+\renewcommand*{\thefootnote}{\fnsymbol{footnote}}
+
+\newcommand{\todo}[1]{{\Large\textcolor{red}{#1}}}
+\newcommand{\done}[1]{{\Large\textcolor{green}{#1}}}
+\newcommand{\dd}[1]{\ensuremath{\mbox{d}#1}}
+
+\DeclareMathOperator*{\argmax}{\arg \max}
+\DeclareMathOperator*{\argmin}{\arg \min}
+\newcommand{\newln}{\\&\quad\quad{}}
+
+\newcommand{\Ax}{\mathcal{A}_x}
+\newcommand{\Ay}{\mathcal{A}_y}
+\newcommand{\ola}{\overleftarrow}
+\newcommand{\ora}{\overrightarrow}
+\newcommand{\ov}{\overline}
+\newcommand{\ts}{\rule{0pt}{2.6ex}}       % Top strut
+\newcommand{\ms}{\rule{0pt}{0ex}}         % Middle strut
+\newcommand{\bs}{\rule[-1.2ex]{0pt}{0pt}} % Bottom strut
+\newcommand{\specialcell}[2][c]{%
+  \begin{tabular}[#1]{@{}c@{}}#2\end{tabular}}
+
+\title{Reweighted Generative Adversarial Networks}
+\author{R Devon Hjelm
+\and
+Athul Paul Jacob
+\and
+Tong Che
+\and
+Sergey M Plis
+\and 
+Yoshua Bengio}
+
+\begin{document}
+
+\maketitle
+\abstract{TODO}
+
+\section{Introduction}
+Generative models provide a means of representing the underlying structure in data.
+While the objective is to faithfully generate data with representative statistics, the strength of generative models lies partially in representing the data as a hypothetical compressed version of its underlying structure.
+Generative adversarial networks~\citep[GANs, ][]{goodfellow2014generative} are a unique generative learning framework that use two separate models with opposing, competing, or \emph{adversarial} objectives.
+In contrast to models which generate the data from a parameteric distribution, such as directed graphical models (e.g., Helmholtz machines~\citep{dayan1995helmholtz}, variational autoencoders~\citep[VAEs,][]{kingma2013auto}, etc) or undirected graphical models (e.g., restricted Boltzmann machines~\citep[RBMs,][]{hinton2002training}, deep Boltzmann machines~\citep[DBMs,][]{salakhutdinov2009deep}), GANs do not rely on maximum likelihood estimation~\citep[MLE,][]{dempster1977maximum} to train.
+Rather, training GANs requires only back-propogating a learning signal originating from a loss function defined on the discriminator.
+
+This framework is powerful, as it trains a generator without relying on MLE, which necessitates some degree of uncertainty on the generated images to work.
+The consequence of this is that models trained with MLE-based algorithms will generate samples that lack real-world qualities (i.e., sharpness in images~\citep{goodfellow2016nips}).
+For continuously valued data, GANs have been shown to be able to generate diverse and realistic samples from high-dimensional large-scale data~\citep{radford2015unsupervised}, which qualitatively can be more representative of data samples than other methods. 
+
+However, GANs face a serious limitation as the data needs to be generated from a continuous function that is completely differentiable.
+For discrete data, generation necessitates a non-continuous function, such as a step function, so that a back-propogated learning signal originating from the discriminator cannot be computed exactly.
+This situation is analogous to that in training Helmholtz machines with discrete units (i.e., sigmoid belief networks~\citep[SBNs,][]{saul1996mean}), where advanced learning algorithms are necessary to train the inference network~\citep{mnih2014neural, bornschein2014reweighted}, while with continuous variables re-parameterization works~\citep{kingma2013auto}.
+A re-parameterization approximation exists for discrete units in the form of the Gumbel softmax, an approach known as the ``Gumbel trick``~\citep{gumbel1954statistical, jang2016categorical}.
+However, this approach is limited, as it only works with simple directed models with single layers of discrete latent variables, and it has been yet have been show to work with GANs.
+
+In this work, we introduce a novel learning objective based on a proposed target distribution that converges to the hypothetical true distribution of the data as the discriminator is optimized.
+The objective can be used to define a KL-divergence loss, which can be used to train the generator on discrete data.
+This objective can also be re-interpreted as an alternative loss on the discriminator output, which can be used to train the generator using backprop with continuous-valued data data.
+We demonstrate this loss on a variety of discrete and continuous datasets, the former of which we show fails using a variety of re-parameterization tricks for back-propagation, including the Gumbel softmax.
+Our work shows that the generator function need not be trained to ``fool" the discriminator: it only needs to be trained to set the generated samples at the decision boundary of the discriminator.
+
+\section{Methods}
+\subsection{Generative Adversarial Networks}
+Generative adversarial networks~\citep[GANs, ][]{goodfellow2014generative} are a two-model generative framework where a generator model is pitted against a discriminatory adversary.
+The generator is composed of a prior distribution, $p(\vz)$, and a generator function, $G(\vz)$ which maps from the space of $\vz$ to the space of $\vx$.
+The objective of the discriminator is to correctly distinguish between data and samples from the generator model by maximizing:
+\begin{align}
+\mathbb{E} \left[\log D(\vx) \right]_{\vx \sim p_{\text{data}}(\vx)} + \mathbb{E} \left[ \log(1 - D(G(\vz)) \right]_{\vz \sim p(\vz)},
+\label{eq:gan}
+\end{align}
+where $D(.)$ is a discriminator function with output in $[0, 1]$.
+The generator is trained to ``fool" the generator, that is minimize $\mathbb{E} \left[ \log(1 - D(G(\vz)) \right]_{\vz \sim p(\vz)}$.
+Together, two models play a minimax game with value function:
+\begin{align}
+\min_G \max_D V(G, D) = \mathbb{E}[\log D(\vx)]_{\vx \sim p(\vx)} + \mathbb{E}[\log (1 - D(G(\vz)))]_{\vz \sim p(\vz)}.
+\label{eq:minmax}
+\end{align}
+
+Samples from the generator are not drawn from a distribution with parameters determined by the generator network, but the are the raw output from $G(.;\PS)$, so that the generative objective involves one continuous function with parameters from both models: $D(G(.;\PS);\PP)$.
+This allows for training a generative model with a relatively simple fitness function and backpropagation, rather than a complex likelihood function, and which does not suffer from some of the learning difficulties as MLE.
+
+In practice, the generator, rather than being trained to minimize the above value function, can be trained to maximize $\log(D(G(\vz)))$ or $\log(D(G(\vz))) - \log(1 - D(G(\vz)))$, which can alleviate some learning issues related to the discriminator loss saturating early in learning and improve stability.
+With basic GANs, both generator and discriminator are feed forward networks, $D(.; \PP)$ and $G(.; \PS)$, while in deep convolutional GANs~\citep[DCGAN,][]{radford2015unsupervised}, the discriminator and generator are convolutional neural networks with strided and fractionally-strided convolutional layers, respectively.
+
+In order for a generating function, $G(.;\PS)$, with real-valued parameters, $\PS$, to generate discrete-valued outputs, $\vx$, $G(.;\PS)$ cannot be fully continuous.
+A natural choice for the generator would be a continuous function, $\vy = f(\vz)$ (e.g., a feed forward network), followed by a step function at $0.5$ so that:
+\begin{align}
+x_i = \phi(y_i) = 
+\begin{cases}
+    1,& \text{if } y_i \geq 0.5\\
+    0,              & \text{otherwise},
+\end{cases}
+\end{align}
+where $\vx = \{x_i\}$ and $\vy = \{y_i\}$.
+However, as the gradients that would otherwise be used to train the generator do not naturally back-propagate through discontinuous functions, it is not possible to train the generator from the discriminator error signal.
+Approximations for the back-propagation signal exist, which we address in more detail in the Results section.
+In order to address the issues more conclusively, we introduce a proposal target distribution for the generator distribution.
+
+\subsection{Target distribution for the generator}
+First consider the optimum discriminator function, $D(\vx)^{\star}$, from the discriminator objective given a fixed generator $G(.)$~\citep{goodfellow2014generative}:
+\begin{align}
+D^{\star}_G(\vx) = \frac{p_{\text{data}}(\vx)}{p_{\text{data}}(\vx) + p_g(\vx)},
+\end{align}
+where $p_{\text{data}}(\vx)$ is the data distribution, and $p_g(\vx)$ is the distribution as generated by $p(\vz)$ and $G(\vz)$.
+Given this optimal discriminator, the density of the data can then be written as:
+\begin{align}
+p_{\text{data}}(\vx) = p_g(\vx) \frac{D^{\star}_G(\vx)}{1 - D^{\star}_G(\vx)}.
+\end{align}
+Which indicates that, in the limit of a perfect discriminator, the true distribution can be perfectly estimated from said discriminator and any fixed generator.
+However, it is unlikely that such a perfect discriminator is learnable or even exists.
+One can then posit the following estimator for the true distribution, given an imperfect discriminator, $D(\vx)$:
+\begin{align}
+\tilde{p}(\vx) = \frac{1}{Z} p_g(\vx) \frac{D(\vx)}{1 - D(\vx)},
+\label{eq:target}
+\end{align}
+where the marginal term, $Z = \sum_{\vx} g_g(\vx) \frac{D(\vx)}{1 - D(\vx)}$, guarantees that $\tilde{p}(\vx)$ is a proper probability distribution.
+Note that the optimum for the generator occurs at $D(\vx) = D^{\star}(\vx) = 1/2$, so that $Z = 1$ and $\tilde{p}(\vx) = p_g(\vx) = p(\vx)$.
+$\tilde{p}(\vx)$ is a potentially biased estimator for the true density.
+However, the bias is implicit only in the quality of $D(\vx)$: the closer $D(\vx)$ is to $D^{\star}(\vx)$, the lower the bias.
+
+\subsection{Discrete variables}
+The above target distribution reveals a straightforward learning algorithm when $p_g(\vx)$ is known.
+For discrete variables, parameterizing the generating distribution directly reveals a means of training the generator without relying on back-propagation through the generator output.
+As with previous work on evaluating GANs~\citep{wu2016quantitative}, we parameterize $p_g(\vx)$ as a the marginalization of a joint density, $p_g(\vx) = \sum_{\vz} g(\vx | \vz) p(\vz)$, rephrasing the generator function, $G(\vz)$, as a conditional distribution, $g(\vx | \vz)$.
+To minimize the distance between $\tilde{p}(\vx)$ and $p_g(\vx)$, we can minimize the KL divergence, so that the gradients w.r.t. the generator parameters, $\PS$, are:
+\begin{align}
+\nabla_{\PS} D_{KL}(\tilde{p}(\vx) || p_g(\vx)) 
+&= \nabla_{\PS} \sum_{\vx} \tilde{p}(\vx) \log \frac{\tilde{p}(\vx)}{p_g(\vx)}
+\approx -\sum_{\vx} \tilde{p}(\vx) \nabla_{\PS} \log p_g(\vx) \nonumber\\
+&= -\sum_{\vx}  \frac{1}{Z} p_g(\vx) \frac{D(\vx)}{1 - D(\vx)} \nabla_{\PS} \log p_g(\vx)
+= -\sum_{\vx} \sum_{\vz}  \frac{1}{Z} g(\vx | \vz) p(\vz) \frac{D(\vx)}{1 - D(\vx)} \nabla_{\PS} \log p_g(\vx),
+\end{align}
+where $\tilde{p}(\vx)$ is held fixed.
+The gradients would require some sort of Monte-Carlo (MC) estimator across the input and output noise and will have high variance, notably due to the partition function, $Z$.
+The intuition here is to note that, as the conditional density, $g(\vx | \vz)$ is unimodal, it can be used to define a unimodal distribution analogous to that of Equation~\ref{eq:target}.
+Following this intuition, we propose training the conditional, $g(\vx | \vz)$, to fit a \emph{mode} of the data as defined by:
+\begin{align}
+\tilde{p}_{\vz}(\vx) = \frac{1}{Z_{\vz}} g(\vx | \vz) \frac{D(\vx)}{1 - D(\vx)},
+\end{align}
+where $\tilde{p}_{\vz}$ is an estimate of the data in the neighborhood of the mode defined by $\vz$, and $Z_{\vz} = \sum_{\vx} g(\vx | \vz) \frac{D(\vx)}{1 - D(\vx)}$ is the marginal that ensures $\tilde{p}_{\vz}$ is a proper probability distribution.
+The gradients then become:
+\begin{align}
+&\nabla_{\PS} D_{KL}(\tilde{p}_{\vz}(\vx) || g(\vz | \vx)) 
+\approx -\sum_{\vx} \tilde{p}_{\vz}(\vx) \nabla_{\PS} \log g(\vx | \vz)
+\approx -\sum_m \tilde{w}^{(m)} \nabla_{\PS} \log g(\vx^{(m)} | \vz), \nonumber\\
+&\text{where} \quad  \tilde{w}^{(m)} = \frac{w^{(m)}}{\sum_{m'} w^{(m')}} \quad
+\text{and} \quad w^{(m)} = \frac{D(x^{(m)})}{1 - D(x^{(m)})}
+\end{align}
+are the normalized and unnormalized importance weights respectively.
+The gradients can be computed over a mini-batch of samples from $p(\vz)$, so that the updates to the generator parameters, $\PS$, become:
+\begin{align}
+\Delta \PS \propto \frac{1}{N} \sum_n \sum_m \tilde{w}^{(m)} \nabla_{\PS} \log g(\vx^{(m)} | \vz^{(n)}).
+\end{align}
+
+This reveals a straightforward procedure for training discrete GANs with a parametric conditional generator without relying on back-propagation.
+(More here about convergence, other properties, etc)
+
+\subsection{Continuous variables}
+For continuous variables, we could introduce a conditional distribution as we did in the discrete case, defining the importance weights, and defining the gradient at the generator output.
+However, this would abandon some of the strengths central to GANs relative to other generative models~\citep{goodfellow2016nips}.
+While $p_g(\vx)$ is unavailable to us, a simple analysis of Equation~\ref{eq:target} shows that the distance (by a number of metrics) between $\tilde{p}(\vx)$ and $p_g(\vx)$ is minimized when $\frac{1}{Z} \frac{D(\vx)}{1 - D(\vx)} = 1$.
+But, as noted, as the ratio, $\frac{D(\vx)}{1 - D(\vx)}$, convergences to one, so does the partition function.
+This reveals an alternative learning objective for the generator as defined at the output of the discriminator, $D(\vx)$.
+There are a number of loss functions that would be suitable, and we pick a simple squared-error loss:
+\begin{align}
+\mathcal{L}_g(\vx) = \frac{1}{2}\left( \log D(\vx) - \log (1 - D(\vx)) \right) ^ 2.
+\end{align}
+(Comments about properties, comparison to normal algorithm, etc)
+
+\section{Related Work}
+Our approach introduces a new learning algorithm that allows for training discrete data with generative adversarial networks (GANs), a first in the literature.
+Discrete data with GANs is an active area of research, particularly with language model data involving recurrent neural network (RNN) generators.
+(Talk about some language model GANs here).
+Our discrete solution is highly analogous to reweighted wake-sleep~\citep[RWS,][]{bornschein2014reweighted}, a highly successful approach for training Helmholtz machines with discrete variables.
+
+The Gumbel-max trick is another approach to train Helmholz machines with discrete variables~\citep{jang2016categorical}, which effectively allows for training as variational autoencoders~\citep[VAEs,][]{kingma2013auto}.
+However, this trick has only been shown to work in very limited settings, and has yet to been shown to work well with GANs with discrete data.
+We address this approach more thoroughly in the following section.
+
+\section{Results}
+\subsection{Discrete variables}
+\subsubsection{Datasets}
+\subsubsection{Setup}
+\subsubsection{Generation results}
+\subsubsection{Modal analysis?}
+\subsubsection{Re-parameteration methods}
+
+\subsection{Continuous variables}
+\subsubsection{Datasets}
+\subsubsection{Setup}
+\subsubsection{Generation results}
+\subsubsection{Comparison to normal GANs}
+
+\section{Conclusion}
+
+\small
+\bibliography{main}
+\bibliographystyle{plain}
+
+\end{document}

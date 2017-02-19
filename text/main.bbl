@@ -1,0 +1,86 @@
+\begin{thebibliography}{10}
+
+\bibitem{bornschein2014reweighted}
+J{\"o}rg Bornschein and Yoshua Bengio.
+\newblock Reweighted wake-sleep.
+\newblock {\em arXiv preprint arXiv:1406.2751}, 2014.
+
+\bibitem{dayan1995helmholtz}
+Peter Dayan, Geoffrey~E Hinton, Radford~M Neal, and Richard~S Zemel.
+\newblock The helmholtz machine.
+\newblock {\em Neural computation}, 7(5):889--904, 1995.
+
+\bibitem{dempster1977maximum}
+Arthur~P Dempster, Nan~M Laird, and Donald~B Rubin.
+\newblock Maximum likelihood from incomplete data via the em algorithm.
+\newblock {\em Journal of the royal statistical society. Series B
+  (methodological)}, pages 1--38, 1977.
+
+\bibitem{dumoulin2016adversarially}
+Vincent Dumoulin, Ishmael Belghazi, Ben Poole, Alex Lamb, Martin Arjovsky,
+  Olivier Mastropietro, and Aaron Courville.
+\newblock Adversarially learned inference.
+\newblock {\em arXiv preprint arXiv:1606.00704}, 2016.
+
+\bibitem{goodfellow2016nips}
+Ian Goodfellow.
+\newblock Nips 2016 tutorial: Generative adversarial networks.
+\newblock {\em arXiv preprint arXiv:1701.00160}, 2016.
+
+\bibitem{goodfellow2014generative}
+Ian Goodfellow, Jean Pouget-Abadie, Mehdi Mirza, Bing Xu, David Warde-Farley,
+  Sherjil Ozair, Aaron Courville, and Yoshua Bengio.
+\newblock Generative adversarial nets.
+\newblock In {\em Advances in Neural Information Processing Systems}, pages
+  2672--2680, 2014.
+
+\bibitem{gumbel1954statistical}
+Emil~Julius Gumbel and Julius Lieblein.
+\newblock Statistical theory of extreme values and some practical applications:
+  a series of lectures.
+\newblock 1954.
+
+\bibitem{hinton2002training}
+Geoffrey~E Hinton.
+\newblock Training products of experts by minimizing contrastive divergence.
+\newblock {\em Neural computation}, 14(8):1771--1800, 2002.
+
+\bibitem{jang2016categorical}
+Eric Jang, Shixiang Gu, and Ben Poole.
+\newblock Categorical reparameterization with gumbel-softmax.
+\newblock {\em arXiv preprint arXiv:1611.01144}, 2016.
+
+\bibitem{kingma2013auto}
+Diederik Kingma and Max Welling.
+\newblock Auto-encoding variational bayes.
+\newblock {\em arXiv preprint arXiv:1312.6114}, 2013.
+
+\bibitem{mnih2014neural}
+Andriy Mnih and Karol Gregor.
+\newblock Neural variational inference and learning in belief networks.
+\newblock In {\em Proceedings of the 31st International Conference on Machine
+  Learning (ICML-14)}, pages 1791--1799, 2014.
+
+\bibitem{radford2015unsupervised}
+Alec Radford, Luke Metz, and Soumith Chintala.
+\newblock Unsupervised representation learning with deep convolutional
+  generative adversarial networks.
+\newblock {\em arXiv preprint arXiv:1511.06434}, 2015.
+
+\bibitem{salakhutdinov2009deep}
+Ruslan Salakhutdinov and Geoffrey~E Hinton.
+\newblock Deep boltzmann machines.
+\newblock In {\em International Conference on Artificial Intelligence and
+  Statistics}, pages 448--455, 2009.
+
+\bibitem{saul1996mean}
+Lawrence~K Saul, Tommi Jaakkola, and Michael~I Jordan.
+\newblock Mean field theory for sigmoid belief networks.
+\newblock {\em Journal of artificial intelligence research}, 4(1):61--76, 1996.
+
+\bibitem{wu2016quantitative}
+Yuhuai Wu, Yuri Burda, Ruslan Salakhutdinov, and Roger Grosse.
+\newblock On the quantitative analysis of decoder-based generative models.
+\newblock {\em arXiv preprint arXiv:1611.04273}, 2016.
+
+\end{thebibliography}
