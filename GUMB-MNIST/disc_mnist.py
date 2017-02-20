@@ -202,10 +202,10 @@ def main(num_epochs=40, initial_eta=2e-4, temp_init=3.0):
 
     #Set optimizers and learning rates
     eta = theano.shared(lasagne.utils.floatX(initial_eta))
-    updates = lasagne.updates.adam(
-        generator_loss, generator_params, learning_rate=eta*0.001, beta1=0.5)
-    updates.update(lasagne.updates.adam(
-        discriminator_loss, discriminator_params, learning_rate=eta*0.1, beta1=0.5))
+    updates = lasagne.updates.rmsprop(
+        generator_loss, generator_params, learning_rate=eta*0.001)
+    updates.update(lasagne.updates.rmsprop(
+        discriminator_loss, discriminator_params, learning_rate=eta*0.1))
 
     # Compile a training function
     train_fn = theano.function([noise_var, input_var, temperature],

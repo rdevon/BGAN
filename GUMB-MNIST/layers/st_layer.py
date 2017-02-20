@@ -14,9 +14,12 @@ class STLayer(lasagne.layers.Layer):
 
 
     def get_output_for(self, _input, **kwargs):
-        input_reshaped = T.reshape(_input, (-1, self.K*self.K))
+        input_reshaped_1 = T.reshape(_input, (-1, 1))
+        input_reshaped_2 = 1 - input_reshaped_1
+        input_reshaped = T.concatenate([input_reshaped_1, input_reshaped_2], axis=1)
         concept = self.trng.multinomial(pvals=input_reshaped, dtype='float32')
         concept_disc = theano.gradient.disconnected_grad(concept)
-        concept_disc = gradient_switch_op(concept_disc, input_reshaped)
+        concept_disc = T.reshape(concept_disc[:, 0], (-1, 1))
+        concept_disc = gradient_switch_op(concept_disc, input_reshaped_1)
         output = T.reshape(concept_disc, (-1, 1, self.K, self.K))
         return output
