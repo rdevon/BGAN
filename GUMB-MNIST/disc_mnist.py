@@ -286,7 +286,7 @@ def train(gumbel_hard, optimGD, lr, anneal_rate, anneal_interval, num_epochs=50,
                         .reshape(10 * 28, 10 * 28)),
                        cmap='gray')
             print("Plotting plot...")
-            label = r'$\optimizer = {}, lr = {}, r = {}, N = {}$'.format(optimGD,
+            label = r'$optimizer = {}, lr = {}, r = {}, N = {}$'.format(optimGD,
                                                                       lr,
                                                                       anneal_rate,
                                                                       anneal_interval)
