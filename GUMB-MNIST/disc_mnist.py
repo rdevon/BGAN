@@ -161,7 +161,7 @@ def build_discriminator(input_var=None):
 # easier to read.
 
 
-def train(gumbel_hard, optimGD, lr, anneal_rate, anneal_interval, num_epochs=20, temp_init=3.0):
+def train(gumbel_hard, optimGD, lr, anneal_rate, anneal_interval, num_epochs=50, temp_init=3.0):
     prefix = "{}_{}_{}_{}_{}".format(gumbel_hard,
                         optimGD,
                         lr,
@@ -172,8 +172,8 @@ def train(gumbel_hard, optimGD, lr, anneal_rate, anneal_interval, num_epochs=20,
 
     # Load the dataset
     log_file.write("Loading data...\n")
-    #source = "/u/jacobath/cortex-data/basic/mnist_binarized_salakhutdinov.pkl.gz"
-    source = "/home/apjacob/data/mnist_binarized_salakhutdinov.pkl.gz"
+    source = "/u/jacobath/cortex-data/basic/mnist_binarized_salakhutdinov.pkl.gz"
+    #source = "/home/apjacob/data/mnist_binarized_salakhutdinov.pkl.gz"
     X_train= load_dataset(source=source, mode="train")
 
     # Prepare Theano variables for inputs and targets
@@ -249,12 +249,13 @@ def train(gumbel_hard, optimGD, lr, anneal_rate, anneal_interval, num_epochs=20,
     log_file.write("Starting training...\n")
     log_file.flush()
     # We iterate over epochs:
+    counter = 0
     for epoch in range(num_epochs):
         # In each epoch, we do a full pass over the training data:
         train_err = 0
         train_batches = 0
         start_time = time.time()
-        counter = 0
+
         for batch in iterate_minibatches(X_train, 128, shuffle=True):
             inputs = np.array(batch, dtype=np.float32)
             noise = lasagne.utils.floatX(np.random.rand(len(inputs), 100))
@@ -269,7 +270,7 @@ def train(gumbel_hard, optimGD, lr, anneal_rate, anneal_interval, num_epochs=20,
         log_file.write("  training loss:\t\t{}\n".format(train_err / train_batches))
         log_file.flush()
 
-        if epoch%3==0:
+        if epoch%1==0:
             log_file.write("Generating Samples...\n")
             samples = gen_fn(lasagne.utils.floatX(np.random.rand(100, 100)), tau)
             import matplotlib.pyplot as plt
@@ -281,11 +282,12 @@ def train(gumbel_hard, optimGD, lr, anneal_rate, anneal_interval, num_epochs=20,
 
 
 if __name__ == '__main__':
-    gumbel_hard = bool(sys.argv[1])
+    gumbel_hard = (sys.argv[1]=="True")
     optimGD = sys.argv[2]
     learning_rate = float(sys.argv[3])
     anneal_rate = float(sys.argv[4])
     anneal_interval = int(sys.argv[5])
+    print("Gumbel Hard: ", gumbel_hard)
     train(gumbel_hard, optimGD, learning_rate, anneal_rate, anneal_interval)
     log_file.close()
 

@@ -4,7 +4,7 @@ import subprocess
 import itertools
 import time
 
-gumbel_hard_arr = [True, False]
+gumbel_hard_arr = ["True", "False"]
 optimGD_arr = ['adam', 'rmsprop', 'sgd']
 learning_rate_arr = [1e-2, 1e-3, 1e-4, 1e-5]
 anneal_rate_arr = [0.01, 0.001, 0.0001]
@@ -18,7 +18,7 @@ def main(start_count=0,debug=False):
     for gumbel_hard, optimGD, lr, anneal_rate, anneal_interval in \
             itertools.product(gumbel_hard_arr, optimGD_arr, learning_rate_arr, anneal_rate_arr, anneal_interval_arr):
 
-        parameters = "%d %s %.6f %.5f %d" % (gumbel_hard, optimGD, lr, anneal_rate, anneal_interval)
+        parameters = "%s %s %.6f %.5f %d" % (gumbel_hard, optimGD, lr, anneal_rate, anneal_interval)
         args = "--gpu --queue=gpu_1 --duree=30:00 --env=THEANO_FLAGS='device=gpu, floatX=float32' --project=jvb-000-ag"
         prefix = "{}_{}_{}_{}_{}".format(gumbel_hard,
                                          optimGD,
