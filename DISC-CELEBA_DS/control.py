@@ -15,18 +15,17 @@ def main():
 
         current_time = time.time()
 
-        save_dir = 'celeba_orig'
+        save_dir = "celeba_rw_ds"
 
         save_dir = os.path.join('/home/devon/Outs/', save_dir)
         binary_dir = save_dir +  '/binaries/'
         image_dir = save_dir + '/images/'
+        gt_image_dir = save_dir + '/gt_images/'
         log_dir = save_dir + '/logs'
 
-        if not os.path.isdir(save_dir):
-            os.mkdir(save_dir)
-            os.mkdir(binary_dir)
-            os.mkdir(image_dir)
-            os.mkdir(log_dir)
+        for d in [save_dir, binary_dir, image_dir, log_dir, gt_image_dir]:
+            if not os.path.isdir(d):
+                os.mkdir(d)
 
         filename = os.path.join(log_dir, 'log_train.txt')
 
@@ -34,7 +33,8 @@ def main():
                      disc_lr=disc_lr,
                      gen_lr=gen_lr,
                      image_dir=image_dir,
-                     binary_dir=binary_dir)
+                     binary_dir=binary_dir,
+                     gt_image_dir=gt_image_dir)
 
 
 if __name__ == '__main__':
