@@ -15,13 +15,9 @@ def main():
 
         current_time = time.time()
 
-        save_dir = '{}-gen_lr-{}-disc_lr-{}-{}'.format(
-            "celeba",
-            gen_lr,
-            disc_lr,
-            str(int(current_time)))
+        save_dir = 'celeba_orig'
 
-        save_dir = os.path.join('./save/', save_dir)
+        save_dir = os.path.join('/home/devon/Outs/', save_dir)
         binary_dir = save_dir +  '/binaries/'
         image_dir = save_dir + '/images/'
         log_dir = save_dir + '/logs'
@@ -38,7 +34,7 @@ def main():
                      disc_lr=disc_lr,
                      gen_lr=gen_lr,
                      image_dir=image_dir,
-                    binary_dir=binary_dir)
+                     binary_dir=binary_dir)
 
 
 if __name__ == '__main__':

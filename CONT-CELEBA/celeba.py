@@ -35,7 +35,7 @@ data_name = "celeba_64.hdf5"
 # them to GPU at once for slightly improved performance. This would involve
 # several changes in the main program, though, and is not demonstrated here.
 
-def load_stream(batch_size = 128, path="/data/lisa/data/"):
+def load_stream(batch_size=64, path="/home/devon/Data/basic/"):
     path = os.path.join(path, data_name)
     train_data = H5PYDataset(path, which_sets=('train',))
     test_data = H5PYDataset(path, which_sets=('test',))
@@ -221,8 +221,8 @@ def reweighted_loss(fake_out):
 
 def train(num_epochs,
           filename,
-          gen_lr=2e-4,
-          disc_lr=2e-4,
+          gen_lr=0.00001,
+          disc_lr=0.00001,
           image_dir=None,
           binary_dir=None):
 
@@ -256,7 +256,7 @@ def train(num_epochs,
                                          lasagne.layers.get_output(generator))
 
 
-    generator_loss = 0.5*reweighted_loss(fake_out)
+    generator_loss = 0.5 * reweighted_loss(fake_out)
     #generator_loss = (T.nnet.softplus(-fake_out)).mean() -- Original GAN loss
 
     # Create disc_loss
@@ -267,12 +267,12 @@ def train(num_epochs,
     discriminator_params = lasagne.layers.get_all_params(discriminator, trainable=True)
 
     #Generator loss
-    updates = lasagne.updates.rmsprop(
-        generator_loss, generator_params, learning_rate=gen_lr)
+    updates = lasagne.updates.adam(
+        generator_loss, generator_params, learning_rate=gen_lr, beta1=0.5)
 
     #Discriminator loss
-    updates.update(lasagne.updates.rmsprop(
-        discriminator_loss, discriminator_params, learning_rate=disc_lr))
+    updates.update(lasagne.updates.adam(
+        discriminator_loss, discriminator_params, learning_rate=disc_lr, beta1=0.5))
 
 
     # Compile a function performing a training step on a mini-batch (by giving
@@ -299,15 +299,20 @@ def train(num_epochs,
         train_err = 0
         train_batches = 0
         start_time = time.time()
+        prefix = "ep_{}".format(epoch)
+        
         for batch in train_stream.get_epoch_iterator():
             inputs = transform(np.array(batch[0],dtype=np.float32))  # or batch
             noise = lasagne.utils.floatX(np.random.rand(len(inputs), 200))
             train_err += np.array(train_fn(noise, inputs))
             train_batches += 1
-            if train_batches % 1000 == 0:
+            if train_batches % 100 == 0:
                 print("{} batches for Epoch {} took {:.3f}s".format(
                     train_batches, epoch + 1, time.time() - start_time))
                 print("  training loss:\t\t{}".format(train_err / train_batches))
+                samples = gen_fn(lasagne.utils.floatX(np.random.rand(5000, 200)))
+                samples_print = samples[0:49]
+                print_images(inverse_transform(samples_print), 7, 7, file=image_dir + prefix + '_gen_tmp.png')
 
         # Then we print the results for this epoch:
         print("Total Epoch {} of {} took {:.3f}s".format(
@@ -319,7 +324,7 @@ def train(num_epochs,
         log_file.flush()
 
         # And finally, we plot some generated data
-        prefix = "ep_{}".format(epoch)
+        
         samples = gen_fn(lasagne.utils.floatX(np.random.rand(5000, 200)))
         samples_print = samples[0:49]
         print_images(inverse_transform(samples_print), 7, 7, file=image_dir + prefix + '_gen.png')
