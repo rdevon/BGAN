@@ -32,7 +32,7 @@ from lasagne.nonlinearities import LeakyRectify, sigmoid
 from layers.gs_layer import GumbelSoftmaxLayer
 from layers.st_layer import STLayer
 floatX = theano.config.floatX
-
+log_file = None
 #Dataset loader
 def load_dataset(source, mode):
     print("Reading MNIST, ", mode)
@@ -116,7 +116,7 @@ class Deconv2DLayer(lasagne.layers.Layer):
         return self.nonlinearity(conved)
 
 
-def build_generator(input_var=None, estimator="ST", temperature=None):
+def build_generator(input_var=None, hard=True, temperature=None):
     from lasagne.layers import InputLayer, ReshapeLayer, DenseLayer, batch_norm
     from lasagne.nonlinearities import sigmoid
     # input: 100dim
@@ -130,13 +130,8 @@ def build_generator(input_var=None, estimator="ST", temperature=None):
     layer = batch_norm(Deconv2DLayer(layer, 64, 5, stride=2, pad=2))
     layer = Deconv2DLayer(layer, 1, 5, stride=2, pad=2,
                           nonlinearity=sigmoid)
-    print("Using estimator: ", estimator)
-    if estimator=="GS":
-        layer = GumbelSoftmaxLayer(layer, K=28, hard=False, temperature=temperature)
-    elif estimator=="GS-ST":
-        layer = GumbelSoftmaxLayer(layer, K=28, hard=True, temperature=temperature)
-    else:
-        layer = STLayer(layer, K=28)
+
+    layer = GumbelSoftmaxLayer(layer, K=28, hard=hard, temperature=temperature)
 
     print("Generator output:", layer.output_shape)
     return layer
@@ -164,12 +159,20 @@ def build_discriminator(input_var=None):
 # more functions to better separate the code, but it wouldn't make it any
 # easier to read.
 
-def main(num_epochs=40, initial_eta=2e-4, temp_init=3.0):
-    anneal_interval = 300
-    anneal_rate = 0.001
+
+def train(gumbel_hard, optimGD, lr, anneal_rate, anneal_interval, num_epochs=20, temp_init=3.0):
+    prefix = "{}_{}_{}_{}_{}".format(gumbel_hard,
+                        optimGD,
+                        lr,
+                        anneal_rate,
+                        anneal_interval)
+    global log_file
+    log_file = open("./gen_logs/%s_log.txt" % prefix, 'w')
+
     # Load the dataset
-    print("Loading data...")
-    source = "/u/jacobath/cortex-data/basic/mnist_binarized_salakhutdinov.pkl.gz"
+    log_file.write("Loading data...\n")
+    #source = "/u/jacobath/cortex-data/basic/mnist_binarized_salakhutdinov.pkl.gz"
+    source = "/home/apjacob/data/mnist_binarized_salakhutdinov.pkl.gz"
     X_train= load_dataset(source=source, mode="train")
 
     # Prepare Theano variables for inputs and targets
@@ -179,11 +182,12 @@ def main(num_epochs=40, initial_eta=2e-4, temp_init=3.0):
     tau = temp_init
 
     # Create neural network model
-    print("Building model and compiling functions...")
+    log_file.write("Building model and compiling functions...\n")
 
-    generator = build_generator(noise_var, temperature=temperature)
+    generator = build_generator(noise_var, temperature=temperature, hard=gumbel_hard)
     discriminator = build_discriminator(input_var)
-
+    log_file.write("Generator and discimininator built...\n")
+    log_file.flush()
     # Create expression for passing real data through the discriminator
     real_out = lasagne.layers.get_output(discriminator)
     fake_out = lasagne.layers.get_output(discriminator,
@@ -201,12 +205,24 @@ def main(num_epochs=40, initial_eta=2e-4, temp_init=3.0):
     discriminator_params = lasagne.layers.get_all_params(discriminator, trainable=True)
 
     #Set optimizers and learning rates
-    eta = theano.shared(lasagne.utils.floatX(initial_eta))
-    updates = lasagne.updates.rmsprop(
-        generator_loss, generator_params, learning_rate=eta*0.001)
-    updates.update(lasagne.updates.rmsprop(
-        discriminator_loss, discriminator_params, learning_rate=eta*0.1))
+    if optimGD=='adam':
+        updates = lasagne.updates.adam(
+            generator_loss, generator_params, learning_rate=lr, beta1=0.5)
+        updates.update(lasagne.updates.adam(
+            discriminator_loss, discriminator_params, learning_rate=lr, beta1=0.5))
+    elif optimGD=='sgd':
+        updates = lasagne.updates.sgd(
+            generator_loss, generator_params, learning_rate=lr)
+        updates.update(lasagne.updates.sgd(
+            discriminator_loss, discriminator_params, learning_rate=lr))
+    else:
+        updates = lasagne.updates.rmsprop(
+            generator_loss, generator_params, learning_rate=lr)
+        updates.update(lasagne.updates.rmsprop(
+            discriminator_loss, discriminator_params, learning_rate=lr))
 
+    log_file.write("Compiling train function...\n")
+    log_file.flush()
     # Compile a training function
     train_fn = theano.function([noise_var, input_var, temperature],
                                [(real_out > 0.).mean(),
@@ -219,6 +235,9 @@ def main(num_epochs=40, initial_eta=2e-4, temp_init=3.0):
                                on_unused_input='ignore')
 
     # Compile another generating function
+    log_file.write("Compiling generation function...\n")
+    log_file.flush()
+
     gen_fn = theano.function([noise_var, temperature],
                              lasagne.layers.get_output(generator,
                                                        deterministic=True),
@@ -226,7 +245,8 @@ def main(num_epochs=40, initial_eta=2e-4, temp_init=3.0):
                              on_unused_input='ignore')
 
     # Finally, launch the training loop.
-    print("Starting training...")
+    log_file.write("Starting training...\n")
+    log_file.flush()
     # We iterate over epochs:
     for epoch in range(num_epochs):
         # In each epoch, we do a full pass over the training data:
@@ -243,27 +263,28 @@ def main(num_epochs=40, initial_eta=2e-4, temp_init=3.0):
             if counter % anneal_interval == 0:
                 tau = np.maximum(tau * np.exp(-anneal_rate * counter), 0.5)
         # Then we print the results for this epoch:
-        print("Epoch {} of {} took {:.3f}s".format(
+        log_file.write("Epoch {} of {} took {:.3f}s\n".format(
             epoch + 1, num_epochs, time.time() - start_time))
-        print("  training loss:\t\t{}".format(train_err / train_batches))
-        # And finally, we plot some generated data
-        prefix = "%d_" % epoch
-        if epoch % 1 == 0:
+        log_file.write("  training loss:\t\t{}\n".format(train_err / train_batches))
+        log_file.flush()
+
+        if epoch%3==0:
+            log_file.write("Generating Samples...\n")
             samples = gen_fn(lasagne.utils.floatX(np.random.rand(100, 100)), tau)
             import matplotlib.pyplot as plt
-            plt.imsave('./gen_images/' + prefix + '.png',
+            plt.imsave('./gen_images/' + prefix + "_epoch_{}".format(epoch) + '.png',
                        (samples.reshape(10, 10, 28, 28)
                         .transpose(0, 2, 1, 3)
                         .reshape(10 * 28, 10 * 28)),
                        cmap='gray')
 
 
-
 if __name__ == '__main__':
-    if ('--help' in sys.argv) or ('-h' in sys.argv):
-        print("Trains a DCGAN on MNIST using Lasagne.")
-        print("Usage: %s [EPOCHS]" % sys.argv[0])
-        print()
-        print("EPOCHS: number of training epochs to perform (default: 100)")
-    else:
-        main()
+    gumbel_hard = bool(sys.argv[1])
+    optimGD = sys.argv[2]
+    learning_rate = float(sys.argv[3])
+    anneal_rate = float(sys.argv[4])
+    anneal_interval = int(sys.argv[5])
+    train(gumbel_hard, optimGD, learning_rate, anneal_rate, anneal_interval)
+    log_file.close()
+
