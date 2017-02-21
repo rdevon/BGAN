@@ -13,6 +13,7 @@ Jan Schlüter, 2015-12-16
 """
 from __future__ import print_function
 
+import random
 import sys
 import os
 import time
@@ -30,6 +31,8 @@ from lasagne.layers import (InputLayer, ReshapeLayer,
 from lasagne.layers.dnn import Conv2DDNNLayer as Conv2DLayer
 from lasagne.nonlinearities import LeakyRectify, sigmoid
 floatX = theano.config.floatX
+
+from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 
 #Dataset loader
 def load_dataset(source, mode):
@@ -188,7 +191,7 @@ def reweighted_loss(fake_out):
 # more functions to better separate the code, but it wouldn't make it any
 # easier to read.
 
-def main(num_epochs=40, initial_eta=0.0001):
+def main(num_epochs=40, n_samples=20, initial_eta=0.0001):
     # Load the dataset
     print("Loading data...")
     source = "/u/jacobath/cortex-data/basic/mnist.pkl.gz"
@@ -198,15 +201,31 @@ def main(num_epochs=40, initial_eta=0.0001):
     noise_var = T.matrix('noise')
     input_var = T.tensor4('inputs')
     # Create neural network model
+    
     print("Building model and compiling functions...")
     generator = build_generator(noise_var)
     discriminator = build_discriminator(input_var)
+    
+    print("Making RNG")
+    trng = RandomStreams(random.randint(1, 1000000))
+
+    # Sample
+    batch_size = noise_var.shape[0]
+    dim_c = input_var.shape[1]
+    dim_x = input_var.shape[2]
+    dim_y = input_var.shape[3]
+    
+    R = trng.uniform(size=(n_samples, batch_size, dim_c, dim_x, dim_y), dtype=floatX)
+
+    g_output = lasagne.layers.get_output(generator)
+    samples = (R <= T.shape_padleft(g_output)).astype(floatX)
 
     # Create expression for passing real data through the discriminator
     real_out = lasagne.layers.get_output(discriminator)
-    fake_out = lasagne.layers.get_output(discriminator,
-                                         lasagne.layers.get_output(generator))
-
+    fake_out = lasagne.layers.get_output(
+        discriminator, samples.reshape(
+            (n_samples * batch_size, dim_c, dim_x, dim_y)))
+    
 
     #Create gen_loss
     # gen_loss = reweighted_loss(fake_out)

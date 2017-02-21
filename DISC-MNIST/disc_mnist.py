@@ -143,10 +143,13 @@ def build_discriminator(input_var=None):
     # input: (None, 1, 28, 28)
     layer = InputLayer(shape=(None, 1, 28, 28), input_var=input_var)
     # two convolutions
-    layer = batch_norm(Conv2DLayer(layer, 64, 5, stride=2, pad=2, nonlinearity=lrelu))
-    layer = batch_norm(Conv2DLayer(layer, 128, 5, stride=2, pad=2, nonlinearity=lrelu))
+    #layer = batch_norm(Conv2DLayer(layer, 64, 5, stride=2, pad=2, nonlinearity=lrelu))
+    layer = Conv2DLayer(layer, 64, 5, stride=2, pad=2, nonlinearity=lrelu)
+    #layer = batch_norm(Conv2DLayer(layer, 128, 5, stride=2, pad=2, nonlinearity=lrelu))
+    layer = Conv2DLayer(layer, 128, 5, stride=2, pad=2, nonlinearity=lrelu)
     # fully-connected layer
-    layer = batch_norm(DenseLayer(layer, 1024, nonlinearity=lrelu))
+    #layer = batch_norm(DenseLayer(layer, 1024, nonlinearity=lrelu))
+    layer = DenseLayer(layer, 1024, nonlinearity=lrelu)
     # output layer
     layer = DenseLayer(layer, 1, nonlinearity=None)
     print ("Discriminator output:", layer.output_shape)
@@ -191,11 +194,11 @@ def reweighted_loss(fake_out):
 # more functions to better separate the code, but it wouldn't make it any
 # easier to read.
 
-def main(num_epochs=40, n_samples=20, initial_eta=0.0001):
+def main(num_epochs=200, n_samples=20, initial_eta=0.00005):
     # Load the dataset
     print("Loading data...")
     source = "/home/devon/Data/basic/mnist_binarized_salakhutdinov.pkl.gz"
-    X_train= load_dataset(source=source, mode="train")
+    X_train = load_dataset(source=source, mode="train")
 
     # Prepare Theano variables for inputs and targets
     noise_var = T.matrix('noise')
@@ -225,23 +228,23 @@ def main(num_epochs=40, n_samples=20, initial_eta=0.0001):
     fake_out = lasagne.layers.get_output(
         discriminator, samples.reshape(
             (n_samples * batch_size, dim_c, dim_x, dim_y)))
-    fake_out_ = T.clip(fake_out, 1e-7, 1 - 1e-7).reshape((n_samples, batch_size))
+    fake_out_ = fake_out.reshape((n_samples, batch_size))
     
-    log_d1 = -T.nnet.softplus(-fake_out_)  # -D_cell.neg_log_prob(1., P=d)
-    log_d0 = -(fake_out_ + T.nnet.softplus(-fake_out_))  # -D_cell.neg_log_prob(0., P=d)
+    log_d1 = -T.nnet.softplus(-fake_out_)
+    log_d0 = -(fake_out_ + T.nnet.softplus(-fake_out_))
     log_w = log_d1 - log_d0
-    g_output_ = T.shape_padleft(T.clip(g_output, 1e-7, 1 - 1e-7))
-    log_g = (samples * T.log(g_output_) + (1. - samples) * T.log(1 - g_output_)).sum(axis=(2, 3, 4))
+    g_output_ = T.shape_padleft(T.clip(g_output, 1e-7, 1. - 1e-7))
+    log_g = (samples * T.log(g_output_) + (1. - samples) * T.log(1. - g_output_)).sum(axis=(2, 3, 4))
 
     # Find normalized weights.
     log_N = T.log(log_w.shape[0]).astype(floatX)
     log_Z_est = log_sum_exp(log_w - log_N, axis=0)
     log_w_tilde = log_w - T.shape_padleft(log_Z_est) - log_N
     w_tilde = T.exp(log_w_tilde)
-    w_tilde = theano.gradient.disconnected_grad(w_tilde)
+    w_tilde_ = theano.gradient.disconnected_grad(w_tilde)
 
     #Create gen_loss
-    generator_loss = -(w_tilde * log_g).sum(0).mean()
+    generator_loss = -(w_tilde_ * log_g).sum(0).mean()
 
     #Create disc_loss
     discriminator_loss = (T.nnet.softplus(-real_out)).mean() + (T.nnet.softplus(-fake_out)).mean() + fake_out.mean()
