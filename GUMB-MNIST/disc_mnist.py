@@ -15,6 +15,7 @@ from __future__ import print_function
 
 import sys
 import os
+os.environ["THEANO_FLAGS"] = "device=gpu,floatX=float32"
 import time
 
 import numpy as np
@@ -145,10 +146,10 @@ def build_discriminator(input_var=None):
     # input: (None, 1, 28, 28)
     layer = InputLayer(shape=(None, 1, 28, 28), input_var=input_var)
     # two convolutions
-    layer = batch_norm(Conv2DLayer(layer, 64, 5, stride=2, pad=2, nonlinearity=lrelu))
-    layer = batch_norm(Conv2DLayer(layer, 128, 5, stride=2, pad=2, nonlinearity=lrelu))
+    layer = Conv2DLayer(layer, 64, 5, stride=2, pad=2, nonlinearity=lrelu)
+    layer = Conv2DLayer(layer, 128, 5, stride=2, pad=2, nonlinearity=lrelu)
     # fully-connected layer
-    layer = batch_norm(DenseLayer(layer, 1024, nonlinearity=lrelu))
+    layer = DenseLayer(layer, 1024, nonlinearity=lrelu)
     # output layer
     layer = DenseLayer(layer, 1, nonlinearity=None)
     print ("Discriminator output:", layer.output_shape)
