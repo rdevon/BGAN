@@ -194,10 +194,11 @@ def reweighted_loss(fake_out):
 # more functions to better separate the code, but it wouldn't make it any
 # easier to read.
 
-def main(num_epochs=200, n_samples=20, initial_eta=0.00005):
+def main(num_epochs=200, n_samples=20, initial_eta=1e-4):
     # Load the dataset
     print("Loading data...")
-    source = "/home/devon/Data/basic/mnist_binarized_salakhutdinov.pkl.gz"
+    #source = "/home/devon/Data/basic/mnist_binarized_salakhutdinov.pkl.gz"
+    source = "/u/jacobath/cortex-data/basic/mnist_binarized_salakhutdinov.pkl.gz"
     X_train = load_dataset(source=source, mode="train")
 
     # Prepare Theano variables for inputs and targets
@@ -290,16 +291,21 @@ def main(num_epochs=200, n_samples=20, initial_eta=0.00005):
             epoch + 1, num_epochs, time.time() - start_time))
         print("  training loss:\t\t{}".format(train_err / train_batches))
         # And finally, we plot some generated data
-        prefix = "%d_" % epoch
+        prefix = "epoch_{}_lr_{}".format(epoch, initial_eta)
         if epoch % 1 == 0:
             samples = gen_fn(lasagne.utils.floatX(np.random.rand(100, 100)))
             import matplotlib.pyplot as plt
-            plt.imsave('/home/devon/Outs/MNIST_conv_rwGAN/gen_images/' + prefix + '.png',
+            #plt.imsave('/home/devon/Outs/MNIST_conv_rwGAN/gen_images/' + prefix + '.png',
+            plt.imsave('./gen_images/' + prefix + '.png',
                        (samples.reshape(10, 10, 28, 28)
                         .transpose(0, 2, 1, 3)
                         .reshape(10 * 28, 10 * 28)),
                        cmap='gray')
 
+        if epoch % 10 == 0:
+            print("Saving model parameters...")
+            np.savez("./gen_binaries/" + prefix + '_disc_mnist_gen_params.npz', *lasagne.layers.get_all_param_values(generator))
+            np.savez("./gen_binaries/" + prefix + '_disc_mnist_disc_params.npz', *lasagne.layers.get_all_param_values(discriminator))
 
 
 if __name__ == '__main__':
@@ -309,4 +315,7 @@ if __name__ == '__main__':
         print()
         print("EPOCHS: number of training epochs to perform (default: 100)")
     else:
-        main()
+        eta_array = [1e-4, 1e-5, 1e-6]
+        for eta in eta_array:
+            print("Current ETA: ", eta)
+            main(initial_eta=eta)

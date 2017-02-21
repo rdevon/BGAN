@@ -17,7 +17,8 @@ import sys
 import os
 os.environ["THEANO_FLAGS"] = "device=gpu,floatX=float32"
 import time
-
+import matplotlib
+matplotlib.use('Agg')
 import numpy as np
 import theano
 import theano.tensor as T
@@ -161,7 +162,7 @@ def build_discriminator(input_var=None):
 # easier to read.
 
 
-def train(gumbel_hard, optimGD, lr, anneal_rate, anneal_interval, num_epochs=50, temp_init=3.0):
+def train(gumbel_hard, optimGD, lr, anneal_rate, anneal_interval, num_epochs=50, temp_init=3.0, plot_colour="b-"):
     prefix = "{}_{}_{}_{}_{}".format(gumbel_hard,
                         optimGD,
                         lr,
@@ -250,7 +251,10 @@ def train(gumbel_hard, optimGD, lr, anneal_rate, anneal_interval, num_epochs=50,
     log_file.flush()
     # We iterate over epochs:
     counter = 0
+    gen_losses = []
+
     for epoch in range(num_epochs):
+
         # In each epoch, we do a full pass over the training data:
         train_err = 0
         train_batches = 0
@@ -259,7 +263,9 @@ def train(gumbel_hard, optimGD, lr, anneal_rate, anneal_interval, num_epochs=50,
         for batch in iterate_minibatches(X_train, 128, shuffle=True):
             inputs = np.array(batch, dtype=np.float32)
             noise = lasagne.utils.floatX(np.random.rand(len(inputs), 100))
-            train_err += np.array(train_fn(noise, inputs, tau))
+            train_out = train_fn(noise, inputs, tau)
+            train_err += np.array(train_out)
+            gen_losses.append(train_out[2])
             train_batches += 1
             counter += 1
             if counter % anneal_interval == 0:
@@ -279,6 +285,12 @@ def train(gumbel_hard, optimGD, lr, anneal_rate, anneal_interval, num_epochs=50,
                         .transpose(0, 2, 1, 3)
                         .reshape(10 * 28, 10 * 28)),
                        cmap='gray')
+            print("Plotting plot...")
+            label = r'$\optimizer = {}, lr = {}, r = {}, N = {}$'.format(optimGD,
+                                                                      lr,
+                                                                      anneal_rate,
+                                                                      anneal_interval)
+            plt.plot(gen_losses, plot_colour, label=label)
 
 
 if __name__ == '__main__':
