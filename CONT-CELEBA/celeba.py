@@ -144,7 +144,7 @@ def build_generator(parameter, input_var=None):
     from lasagne.layers import InputLayer, ReshapeLayer, DenseLayer, batch_norm
     from lasagne.nonlinearities import tanh
 
-    layer = InputLayer(shape=(None, 200), input_var=input_var)
+    layer = InputLayer(shape=(None, 100), input_var=input_var)
 
     # fully-connected layer
     layer = DenseLayer(layer, 128 * 8 * 4 * 4)
@@ -222,7 +222,11 @@ def reweighted_loss(fake_out):
 def train(num_epochs,
           filename,
           gen_lr=2e-4,
+          beta_1_gen=0.5,
+          beta_2_disc=0.5,
+          print_freq=200,
           disc_lr=2e-4,
+          num_iter_gen = 2,
           image_dir=None,
           binary_dir=None):
 
@@ -266,22 +270,25 @@ def train(num_epochs,
     generator_params = lasagne.layers.get_all_params(generator, trainable=True)
     discriminator_params = lasagne.layers.get_all_params(discriminator, trainable=True)
 
-    #Generator loss
-    updates = lasagne.updates.rmsprop(
-        generator_loss, generator_params, learning_rate=gen_lr)
+    # Generator loss
+    generator_updates = lasagne.updates.adam(
+        generator_loss, generator_params, learning_rate=gen_lr, beta1=beta_1_gen)
 
-    #Discriminator loss
-    updates.update(lasagne.updates.rmsprop(
-        discriminator_loss, discriminator_params, learning_rate=disc_lr))
+    # Discriminator loss
+    discriminator_updates = lasagne.updates.adam(
+        discriminator_loss, discriminator_params, learning_rate=disc_lr, beta2=beta_2_disc)
 
 
-    # Compile a function performing a training step on a mini-batch (by giving
-    # the updates dictionary) and returning the corresponding training loss:
-    train_fn = theano.function([noise_var, input_var],
-                               [(real_out > 0.).mean(),
-                                (fake_out < 0.).mean(),
+    train_discriminator = theano.function([noise_var, input_var],
+                               [(real_out > 0.).mean(), discriminator_loss],
+                                allow_input_downcast=True,
+                               updates=discriminator_updates)
+
+    train_generator = theano.function([noise_var],
+                               [(fake_out < 0.).mean(),
                                 generator_loss],
-                               updates=updates)
+                                allow_input_downcast=True,
+                               updates=generator_updates)
 
     # Compile another function generating some data
     gen_fn = theano.function([noise_var],
@@ -301,26 +308,48 @@ def train(num_epochs,
         start_time = time.time()
         for batch in train_stream.get_epoch_iterator():
             inputs = transform(np.array(batch[0],dtype=np.float32))  # or batch
-            noise = lasagne.utils.floatX(np.random.rand(len(inputs), 200))
-            train_err += np.array(train_fn(noise, inputs))
+            noise = lasagne.utils.floatX(np.random.rand(len(inputs), 100))
+
+            train_discriminator(noise, inputs)
+            disc_train_out = train_discriminator(noise, inputs)
+            p_real, disc_loss = disc_train_out
+
+            gen_loss_array = []
+            p_fake_array = []
+
+            for i in range(num_iter_gen):
+                gen_train_out = train_generator(noise)
+                p_fake, gen_loss = gen_train_out
+                gen_loss_array.append(gen_loss)
+                p_fake_array.append(p_fake)
+
+            gen_loss = np.mean(gen_loss_array)
+            p_fake = np.mean(p_fake_array)
+
             train_batches += 1
-            if train_batches % 1000 == 0:
-                print("{} batches for Epoch {} took {:.3f}s".format(
-                    train_batches, epoch + 1, time.time() - start_time))
-                print("  training loss:\t\t{}".format(train_err / train_batches))
+            if train_batches % print_freq == 0:
+                print('-' * 80)
+                print("Batch Number: {}, Epoch Number: {}".format(train_batches + 1, epoch + 1))
+                print("Generator: p_fake: {}, gen_loss: {}".format(p_fake, gen_loss))
+                print("Discriminator: p_real: {}, disc_loss: {}".format(p_real, disc_loss))
+                log_file.write('-' * 80 + '\n')
+                log_file.write("Batch Number: {}".format(train_batches + 1, epoch + 1) + '\n')
+                log_file.write("Generator: p_fake: {}, gen_loss: {} \n".format(p_fake, disc_loss))
+                log_file.write("Discriminator: p_real: {}, disc_loss: {} \n".format(p_real, disc_loss))
+                log_file.write('-' * 80 + '\n')
 
         # Then we print the results for this epoch:
         print("Total Epoch {} of {} took {:.3f}s".format(
             epoch + 1, num_epochs, time.time() - start_time))
         log_file.write("Total Epoch {} of {} took {:.3f}s\n".format(
             epoch + 1, num_epochs, time.time() - start_time))
-        print("  training loss:\t\t{}".format(train_err / train_batches))
+
         log_file.write("  training loss:\t{}\n".format(train_err / train_batches))
         log_file.flush()
 
         # And finally, we plot some generated data
         prefix = "ep_{}".format(epoch)
-        samples = gen_fn(lasagne.utils.floatX(np.random.rand(5000, 200)))
+        samples = gen_fn(lasagne.utils.floatX(np.random.rand(5000, 100)))
         samples_print = samples[0:49]
         print_images(inverse_transform(samples_print), 7, 7, file=image_dir + prefix + '_gen.png')
         #if epoch == num_epochs - 1: #save binary data for further calculation
