@@ -19,4 +19,4 @@ def gumbel_softmax(incoming, rng, temperature, hard=False, dtype=None):
         y_hard = T.cast(T.eq(y, T.max(y, axis=1, keepdims=True)), dtype)
         y = theano.gradient.disconnected_grad(y_hard - y) + y
 
-    return y[:, 1]
+    return y[:, 0]
