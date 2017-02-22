@@ -81,7 +81,8 @@ class To8Bit(Transformer):
 # them to GPU at once for slightly improved performance. This would involve
 # several changes in the main program, though, and is not demonstrated here.
 
-def load_stream(batch_size=128, path="/data/lisa/data/"):
+#def load_stream(batch_size=128, path="/data/lisa/data/"):
+def load_stream(batch_size=128, path="/home/devon/Data/basic/"):
     path = os.path.join(path, data_name)
     train_data = H5PYDataset(path, which_sets=('train',))
     test_data = H5PYDataset(path, which_sets=('test',))
@@ -266,7 +267,9 @@ def reweighted_loss(fake_out):
     return cost
 
 def convert_to_rgb(samples, img):
-    samples = np.packbits(samples.astype('int8')[:, ::-1], axis=1)[:, 0]
+    arr = np.zeros((samples.shape[0], samples.shape[1] * 2, samples.shape[2], samples.shape[3]))
+    arr[:, 4:] = samples[:, ::-1]
+    samples = np.packbits(arr.astype('int8'), axis=1)[:, 0]
     new_samples = []
     for sample in samples:
         img2 = Image.fromarray(sample)
@@ -289,9 +292,10 @@ def train(num_epochs,
           binary_dir=None,
           gt_image_dir=None):
     
-    f = h5py.File('/data/lisa/data/celeba_64.hdf5', 'r')
+    #f = h5py.File('/data/lisa/data/celeba_64.hdf5', 'r')
+    f = h5py.File('/home/devon/Data/basic/celeba_64.hdf5', 'r')
     arr = f['features'][0]
-    img = Image.fromarray(arr.transpose(1, 2, 0)).convert('P')
+    img = Image.fromarray(arr.transpose(1, 2, 0)).convert('P', palette=Image.ADAPTIVE, colors=16)
 
     # Load the dataset
     log_file = open(filename, 'w')
@@ -409,6 +413,8 @@ def train(num_epochs,
         
         for batch in train_stream.get_epoch_iterator():
             inputs = np.array(batch[0], dtype=np.float32)
+            samples_print_gt = convert_to_rgb(inputs, img)
+            
             noise = lasagne.utils.floatX(np.random.rand(len(inputs), 100))
             
             train_discriminator(noise, inputs)
