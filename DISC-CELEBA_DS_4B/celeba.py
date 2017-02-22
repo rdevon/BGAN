@@ -38,7 +38,8 @@ data_name = "celeba_64.hdf5"
 
 
 class To8Bit(Transformer):
-    def __init__(self, data_stream, **kwargs):
+    def __init__(self, data_stream, img, **kwargs):
+        self.img = img
         super(To8Bit, self).__init__(
             data_stream=data_stream,
             produces_examples=data_stream.produces_examples,
@@ -50,8 +51,8 @@ class To8Bit(Transformer):
             index = self.sources.index('features')
             arr = example[index]
             img = Image.fromarray(arr.transpose(1, 2, 0))
-            img = img.resize((32, 32), Image.ANTIALIAS)
-            img = img.convert(mode='P', palette=Image.ADAPTIVE, colors=16)
+            #img = img.resize((32, 32), Image.ANTIALIAS)
+            img = img.convert(mode='P', palette=Image.WEB, colors=16)
             arr = np.array(img)
             example[index] = (((arr[:, :, None] & (1 << np.arange(4)))) > 0).astype(int).transpose(2, 0, 1)
             example = tuple(example)
@@ -63,9 +64,10 @@ class To8Bit(Transformer):
             index = self.sources.index('features')
             new_arr = []
             for arr in batch[index]:
+                #print(arr[:, 0, 0])
                 img = Image.fromarray(arr.transpose(1, 2, 0))
                 img = img.resize((32, 32), Image.ANTIALIAS)
-                img = img.convert(mode='P', palette=Image.ADAPTIVE, colors=16)
+                img = img.quantize(palette=self.img)
                 arr = np.array(img)
                 new_arr.append((((arr[:, :, None] & (1 << np.arange(4)))) > 0).astype(int))
             batch[index] = np.array(new_arr).transpose(0, 3, 1, 2)
@@ -82,7 +84,7 @@ class To8Bit(Transformer):
 # several changes in the main program, though, and is not demonstrated here.
 
 #def load_stream(batch_size=128, path="/data/lisa/data/"):
-def load_stream(batch_size=128, path="/home/devon/Data/basic/"):
+def load_stream(batch_size=64, path="/home/devon/Data/basic/", img=None):
     path = os.path.join(path, data_name)
     train_data = H5PYDataset(path, which_sets=('train',))
     test_data = H5PYDataset(path, which_sets=('test',))
@@ -91,10 +93,10 @@ def load_stream(batch_size=128, path="/home/devon/Data/basic/"):
     print("Number of test examples: ", num_test)
     print("Number of training examples: ", num_train)
     train_scheme = ShuffledScheme(examples=num_train, batch_size=batch_size)
-    train_stream = To8Bit(data_stream=DataStream(
+    train_stream = To8Bit(img=img, data_stream=DataStream(
         train_data, iteration_scheme=train_scheme))
     test_scheme = ShuffledScheme(examples=num_test, batch_size=batch_size)
-    test_stream = To8Bit(data_stream=DataStream(
+    test_stream = To8Bit(img=img, data_stream=DataStream(
         test_data, iteration_scheme=test_scheme))
     return train_stream, test_stream
 
@@ -294,9 +296,14 @@ def train(num_epochs,
     
     #f = h5py.File('/data/lisa/data/celeba_64.hdf5', 'r')
     f = h5py.File('/home/devon/Data/basic/celeba_64.hdf5', 'r')
-    arr = f['features'][0]
-    img = Image.fromarray(arr.transpose(1, 2, 0)).convert('P', palette=Image.ADAPTIVE, colors=16)
+    #arr = f['features'][0]
+    f = h5py.File('/home/devon/Data/basic/celeba_64.hdf5', 'r')
+    arr = f['features'][:1000]
+    arr = arr.transpose(0, 2, 3, 1)
+    arr = arr.reshape((arr.shape[0] * arr.shape[1], arr.shape[2], arr.shape[3]))
+    img = Image.fromarray(arr).convert('P', palette=Image.ADAPTIVE, colors=16)
 
+    
     # Load the dataset
     log_file = open(filename, 'w')
     print("Loading data...")
@@ -307,7 +314,7 @@ def train(num_epochs,
                                                                       disc_lr,
                                                                       gen_lr))
     log_file.flush()
-    train_stream, test_stream = load_stream()
+    train_stream, test_stream = load_stream(img=img)
     # Prepare Theano variables for inputs and targets
     noise_var = T.matrix('noise')
     input_var = T.tensor4('inputs')
@@ -413,8 +420,6 @@ def train(num_epochs,
         
         for batch in train_stream.get_epoch_iterator():
             inputs = np.array(batch[0], dtype=np.float32)
-            samples_print_gt = convert_to_rgb(inputs, img)
-            
             noise = lasagne.utils.floatX(np.random.rand(len(inputs), 100))
             
             train_discriminator(noise, inputs)
