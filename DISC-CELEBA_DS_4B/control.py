@@ -3,8 +3,8 @@ import celeba
 import os
 import time
 
-genlrlist = [1e-3]
-disclrlist = [1e-3]
+genlrlist = [5e-2]
+disclrlist = [5e-2]
 
 epochs = 200
 def main():
@@ -13,15 +13,15 @@ def main():
         print("=========================================================")
         print("=========================================================")
         print("=========================================================")
-        '''
+
         save_dir = '{}-lr-{}'.format(
             "celeba",
             gen_lr,
         )
-        '''
-        save_dir = 'celeba_4b'
-        #save_dir = os.path.join('./save/', save_dir)
-        save_dir = os.path.join('/home/devon/Outs/', save_dir)
+
+        #save_dir = 'celeba_4b'
+        save_dir = os.path.join('./save/', save_dir)
+        #save_dir = os.path.join('/home/devon/Outs/', save_dir)
         binary_dir = save_dir + '/binaries/'
         image_dir = save_dir + '/images/'
         gt_image_dir = save_dir + '/gt_images/'
