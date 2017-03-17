@@ -83,8 +83,8 @@ class To8Bit(Transformer):
 # them to GPU at once for slightly improved performance. This would involve
 # several changes in the main program, though, and is not demonstrated here.
 
-def load_stream(batch_size=128, path="/data/lisa/data/", img=None):
-#def load_stream(batch_size=64, path="/home/devon/Data/basic/", img=None):
+#def load_stream(batch_size=128, path="/data/lisa/data/", img=None):
+def load_stream(batch_size=64, path="/home/devon/Data/basic/", img=None):
     path = os.path.join(path, data_name)
     train_data = H5PYDataset(path, which_sets=('train',))
     test_data = H5PYDataset(path, which_sets=('test',))
@@ -161,7 +161,7 @@ def build_discriminator(input_var=None):
     lrelu = LeakyRectify(0.2)
     layer = InputLayer(shape=(None, 4, 32, 32), input_var=input_var)
     # two convolutions
-    layer = Conv2DLayer(layer, 128, 5, stride=2, pad=2, nonlinearity=lrelu)
+    layer = Conv2DLayer(layer, 256, 5, stride=2, pad=2, nonlinearity=lrelu)
     
     '''
     layer = batch_norm(Conv2DLayer(layer, 128 * 2, 5, stride=2, pad=2, nonlinearity=lrelu))
@@ -169,8 +169,8 @@ def build_discriminator(input_var=None):
     layer = batch_norm(Conv2DLayer(layer, 128 * 8, 5, stride=2, pad=2, nonlinearity=lrelu))
     '''
     
-    layer = Conv2DLayer(layer, 128 * 2, 5, stride=2, pad=2, nonlinearity=lrelu)
-    layer = Conv2DLayer(layer, 128 * 4, 5, stride=2, pad=2, nonlinearity=lrelu)
+    layer = Conv2DLayer(layer, 256 * 2, 5, stride=2, pad=2, nonlinearity=lrelu)
+    layer = Conv2DLayer(layer, 256 * 4, 5, stride=2, pad=2, nonlinearity=lrelu)
     #layer = Conv2DLayer(layer, 128 * 8, 5, stride=2, pad=2, nonlinearity=lrelu)
     
     layer = DenseLayer(layer, 1, nonlinearity=None)
@@ -180,18 +180,18 @@ def build_discriminator(input_var=None):
 
 def initial_parameters():
     parameter = {}
-    parameter['beta1'] = theano.shared(np.zeros(128 * 4 * 4 * 4).astype('float32'))
-    parameter['gamma1'] = theano.shared(np.ones(128 * 4 * 4 * 4).astype('float32'))
-    parameter['mean1'] = theano.shared(np.zeros(128 * 4 * 4 * 4).astype('float32'))
-    parameter['inv_std1'] = theano.shared(np.ones(128 * 4 * 4 * 4).astype('float32'))
-    parameter['beta2'] = theano.shared(np.zeros(128 * 2).astype('float32'))
-    parameter['gamma2'] = theano.shared(np.ones(128 * 2).astype('float32'))
-    parameter['mean2'] = theano.shared(np.zeros(128 * 2).astype('float32'))
-    parameter['inv_std2'] = theano.shared(np.ones(128 * 2).astype('float32'))
-    parameter['beta3'] = theano.shared(np.zeros(128).astype('float32'))
-    parameter['gamma3'] = theano.shared(np.ones(128).astype('float32'))
-    parameter['mean3'] = theano.shared(np.zeros(128).astype('float32'))
-    parameter['inv_std3'] = theano.shared(np.ones(128).astype('float32'))
+    parameter['beta1'] = theano.shared(np.zeros(256 * 4 * 4 * 4).astype('float32'))
+    parameter['gamma1'] = theano.shared(np.ones(256 * 4 * 4 * 4).astype('float32'))
+    parameter['mean1'] = theano.shared(np.zeros(256 * 4 * 4 * 4).astype('float32'))
+    parameter['inv_std1'] = theano.shared(np.ones(256 * 4 * 4 * 4).astype('float32'))
+    parameter['beta2'] = theano.shared(np.zeros(256 * 2).astype('float32'))
+    parameter['gamma2'] = theano.shared(np.ones(256 * 2).astype('float32'))
+    parameter['mean2'] = theano.shared(np.zeros(256 * 2).astype('float32'))
+    parameter['inv_std2'] = theano.shared(np.ones(256 * 2).astype('float32'))
+    parameter['beta3'] = theano.shared(np.zeros(256).astype('float32'))
+    parameter['gamma3'] = theano.shared(np.ones(256).astype('float32'))
+    parameter['mean3'] = theano.shared(np.zeros(256).astype('float32'))
+    parameter['inv_std3'] = theano.shared(np.ones(256).astype('float32'))
     return parameter
 
 
@@ -202,19 +202,19 @@ def build_generator(parameter, input_var=None):
     layer = InputLayer(shape=(None, 100), input_var=input_var)
 
     # fully-connected layer
-    layer = DenseLayer(layer, 128 * 4 * 4 * 4)
+    layer = DenseLayer(layer, 256 * 4 * 4 * 4)
     parameter['W1'] = layer.W
     parameter['b1'] = layer.b
     layer = batch_norm(layer, beta=parameter['beta1'], gamma=parameter['gamma1'],
                        mean=parameter['mean1'], inv_std=parameter['inv_std1'])
-    layer = ReshapeLayer(layer, ([0], 128 * 4, 4, 4))
-    layer = Deconv2DLayer(layer, 128 * 2, 5, stride=2, pad=2)
+    layer = ReshapeLayer(layer, ([0], 256 * 4, 4, 4))
+    layer = Deconv2DLayer(layer, 256 * 2, 5, stride=2, pad=2)
     parameter['W2'] = layer.W
     parameter['b2'] = layer.b
     layer = batch_norm(layer, beta=parameter['beta2'], gamma=parameter['gamma2'],
                        mean=parameter['mean2'], inv_std=parameter['inv_std2'])
 
-    layer = Deconv2DLayer(layer, 128, 5, stride=2, pad=2)
+    layer = Deconv2DLayer(layer, 256, 5, stride=2, pad=2)
     parameter['W3'] = layer.W
     parameter['b3'] = layer.b
     layer = batch_norm(layer, beta=parameter['beta3'], gamma=parameter['gamma3'],
@@ -294,8 +294,8 @@ def train(num_epochs,
           binary_dir=None,
           gt_image_dir=None):
     
-    f = h5py.File('/data/lisa/data/celeba_64.hdf5', 'r')
-    #f = h5py.File('/home/devon/Data/basic/celeba_64.hdf5', 'r')
+    #f = h5py.File('/data/lisa/data/celeba_64.hdf5', 'r')
+    f = h5py.File('/home/devon/Data/basic/celeba_64.hdf5', 'r')
     #arr = f['features'][0]
     #f = h5py.File('/home/devon/Data/basic/celeba_64.hdf5', 'r')
     arr = f['features'][:1000]

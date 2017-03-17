@@ -87,8 +87,8 @@ class To8Bit(Transformer):
 # them to GPU at once for slightly improved performance. This would involve
 # several changes in the main program, though, and is not demonstrated here.
 
-def load_stream(batch_size=128, path="/data/lisa/data/", img=None):
-#def load_stream(batch_size=64, path="/home/devon/Data/basic/", img=None):
+#def load_stream(batch_size=128, path="/data/lisa/data/", img=None):
+def load_stream(batch_size=64, path="/home/devon/Data/basic/", img=None):
     path = os.path.join(path, data_name)
     train_data = H5PYDataset(path, which_sets=('train',))
     test_data = H5PYDataset(path, which_sets=('test',))
@@ -288,8 +288,8 @@ def train(num_epochs,
           binary_dir=None,
           gt_image_dir=None):
 
-    f = h5py.File('/data/lisa/data/celeba_64.hdf5', 'r')
-    #f = h5py.File('/home/devon/Data/basic/celeba_64.hdf5', 'r')
+    #f = h5py.File('/data/lisa/data/celeba_64.hdf5', 'r')
+    f = h5py.File('/home/devon/Data/basic/celeba_64.hdf5', 'r')
     #arr = f['features'][0]
     #f = h5py.File('/home/devon/Data/basic/celeba_64.hdf5', 'r')
     arr = f['features'][:1000]
@@ -303,9 +303,8 @@ def train(num_epochs,
     print("Testing RW_DCGAN ...")
     log_file.write("Testing RW_DCGAN...\n")
     log_file.write("Loading data...\n")
-    log_file.write("Num_epochs: {}, disc_lr: {}, gen_lr: {}\n".format(num_epochs,
-                                                                      disc_lr,
-                                                                      gen_lr))
+    log_file.write("Num_epochs: {}, disc_lr: {}, gen_lr: {}\n".format(
+        num_epochs, disc_lr, gen_lr))
     log_file.flush()
     train_stream, test_stream = load_stream(img=img)
     # Prepare Theano variables for inputs and targets
@@ -459,7 +458,7 @@ def train(num_epochs,
                 log_file.write("Generator: p_fake: {}, gen_loss: {} \n".format(p_fake, disc_loss))
                 log_file.write("Discriminator: p_real: {}, disc_loss: {} \n".format(p_real, disc_loss))
                 log_file.write('-' * 80 + '\n')
-                samples = gen_fn(lasagne.utils.floatX(np.random.rand(49, 100))).astype(int)
+                samples = gen_fn(lasagne.utils.floatX(np.random.rand(49, 100)))
                 samples_print = convert_to_rgb(samples, img)
                 print_images(samples_print, 7, 7, file=image_dir + prefix + "_{}".format(train_batches) +'_gen.png')
                 
@@ -476,12 +475,12 @@ def train(num_epochs,
         log_file.flush()
 
         # And finally, we plot some generated data
-        samples = gen_fn(lasagne.utils.floatX(np.random.rand(49, 100))).astype(int)
+        samples = gen_fn(lasagne.utils.floatX(np.random.rand(49, 100)))
         samples_print = convert_to_rgb(samples, img)
         print_images(samples_print, 7, 7, file=image_dir + prefix + '_gen.png')
         #if epoch == num_epochs - 1: #save binary data for further calculation
-        np.savez(binary_dir + prefix + '_celeba_gen_params.npz', *lasagne.layers.get_all_param_values(generator))
-
+        np.savez(binary_dir + prefix + '_celeba_gen_params.npz',
+                 *lasagne.layers.get_all_param_values(generator))
 
     log_file.flush()
     log_file.close()
