@@ -132,9 +132,9 @@ def build_generator(input_var=None, hard=True, temperature=None):
     layer = batch_norm(Deconv2DLayer(layer, 64, 5, stride=2, pad=2))
     layer = Deconv2DLayer(layer, 1, 5, stride=2, pad=2,
                           nonlinearity=lasagne.nonlinearities.identity)
-    layer = ReshapeLayer(layer, (-1, 28*28))
-    layer = DenseLayer(layer, 28*28*2, nonlinearity=None)
-    layer = GumbelSoftmaxLayer(layer, K=28, hard=hard, temperature=temperature)
+    # layer = ReshapeLayer(layer, (-1, 28*28))
+    # layer = DenseLayer(layer, 28*28*2, nonlinearity=None)
+    # layer = GumbelSoftmaxLayer(layer, K=28, hard=hard, temperature=temperature)
 
     print("Generator output:", layer.output_shape)
     return layer
@@ -290,10 +290,7 @@ def train(gumbel_hard, optimGD, lr, anneal_rate, anneal_interval, num_epochs=50,
 
     import matplotlib.pyplot as plt
     print("Plotting plot...")
-    label = r'$optimizer = {}, lr = {}, r = {}, N = {}$'.format(optimGD,
-                                                              lr,
-                                                              anneal_rate,
-                                                              anneal_interval)
+    label = r'$lr = {}$'.format(optimGD, lr, anneal_rate,  anneal_interval)
     plt.plot(mean_losses, plot_colour, label=label)
 
 
