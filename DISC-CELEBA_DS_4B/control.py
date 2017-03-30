@@ -1,5 +1,5 @@
 import itertools
-import celeba#_mn as celeba
+import celeba_mn as celeba
 import os
 import time
 

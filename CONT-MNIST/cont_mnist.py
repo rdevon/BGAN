@@ -125,7 +125,7 @@ def build_generator(input_var=None):
     # fully-connected layer
     layer = batch_norm(DenseLayer(layer, 1024))
     # project and reshape
-    layer = batch_norm(DenseLayer(layer, 128*7*7))
+    layer = batch_norm(DenseLayer(layer, 128 * 7 * 7))
     layer = ReshapeLayer(layer, ([0], 128, 7, 7))
     # two fractional-stride convolutions
     layer = batch_norm(Deconv2DLayer(layer, 64, 5, stride=2, pad=2))
@@ -143,10 +143,10 @@ def build_discriminator(input_var=None):
     # input: (None, 1, 28, 28)
     layer = InputLayer(shape=(None, 1, 28, 28), input_var=input_var)
     # two convolutions
-    layer = batch_norm(Conv2DLayer(layer, 64, 5, stride=2, pad=2, nonlinearity=lrelu))
-    layer = batch_norm(Conv2DLayer(layer, 128, 5, stride=2, pad=2, nonlinearity=lrelu))
+    layer = Conv2DLayer(layer, 64, 5, stride=2, pad=2, nonlinearity=lrelu)
+    layer = Conv2DLayer(layer, 128, 5, stride=2, pad=2, nonlinearity=lrelu)
     # fully-connected layer
-    layer = batch_norm(DenseLayer(layer, 1024, nonlinearity=lrelu))
+    layer = DenseLayer(layer, 1024, nonlinearity=lrelu)
     # output layer
     layer = DenseLayer(layer, 1, nonlinearity=None)
     print ("Discriminator output:", layer.output_shape)
@@ -174,16 +174,20 @@ def norm_exp(log_factor):
 
 def reweighted_loss(fake_out):
     log_d1 = -T.nnet.softplus(-fake_out)  # -D_cell.neg_log_prob(1., P=d)
-    log_d0 = -(fake_out+T.nnet.softplus(-fake_out))  # -D_cell.neg_log_prob(0., P=d)
+    log_d0 = -fake_out - T.nnet.softplus(-fake_out)  # -D_cell.neg_log_prob(0., P=d)
     log_w = log_d1 - log_d0
 
     # Find normalized weights.
     log_N = T.log(log_w.shape[0]).astype(floatX)
     log_Z_est = log_sum_exp(log_w - log_N, axis=0)
+    log_Z_est = theano.gradient.disconnected_grad(log_Z_est)
     log_w_tilde = log_w - T.shape_padleft(log_Z_est) - log_N
 
+    #cost = (log_w ** 2).mean()
     cost = ((log_w - T.maximum(log_Z_est, -2)) ** 2).mean()
-
+    #cost = ((fake_out - log_Z_est) ** 2).mean()
+    #cost = (fake_out ** 2).mean()
+    
     return cost
 
 # ############################## Main program ################################
@@ -191,10 +195,11 @@ def reweighted_loss(fake_out):
 # more functions to better separate the code, but it wouldn't make it any
 # easier to read.
 
-def main(num_epochs=40, n_samples=20, initial_eta=0.0001):
+def main(num_epochs=40, n_samples=20, initial_eta=0.01):
     # Load the dataset
     print("Loading data...")
-    source = "/u/jacobath/cortex-data/basic/mnist.pkl.gz"
+    #source = "/u/jacobath/cortex-data/basic/mnist.pkl.gz"
+    source = "/home/devon/Data/basic/mnist.pkl.gz"
     X_train= load_dataset(source=source, mode="train")
 
     # Prepare Theano variables for inputs and targets
@@ -226,10 +231,10 @@ def main(num_epochs=40, n_samples=20, initial_eta=0.0001):
         discriminator, samples.reshape(
             (n_samples * batch_size, dim_c, dim_x, dim_y)))
     
-
     #Create gen_loss
     # gen_loss = reweighted_loss(fake_out)
-    generator_loss = reweighted_loss(fake_out) #0.5*(T.nnet.softplus(-fake_out)).mean()
+    #generator_loss = reweighted_loss(fake_out) #0.5*(T.nnet.softplus(-fake_out)).mean()
+    generator_loss = T.nnet.softplus(-fake_out).mean()
 
     #Create disc_loss
     discriminator_loss = (T.nnet.softplus(-real_out)).mean() + (T.nnet.softplus(-fake_out)).mean() + fake_out.mean()
@@ -240,10 +245,13 @@ def main(num_epochs=40, n_samples=20, initial_eta=0.0001):
 
     #Set optimizers and learning rates
     eta = theano.shared(lasagne.utils.floatX(initial_eta))
-    updates = lasagne.updates.rmsprop(
-        generator_loss, generator_params, learning_rate=eta)
-    updates.update(lasagne.updates.rmsprop(
-        discriminator_loss, discriminator_params, learning_rate=eta))
+    # Generator loss
+    updates = lasagne.updates.adam(
+        generator_loss, generator_params, learning_rate=0.0001, beta1=0.5)
+
+    # Discriminator loss
+    updates.update(lasagne.updates.adam(
+        discriminator_loss, discriminator_params, learning_rate=0.0001, beta1=0.5))
 
     # Compile a training function
     train_fn = theano.function([noise_var, input_var],
@@ -279,7 +287,7 @@ def main(num_epochs=40, n_samples=20, initial_eta=0.0001):
         if epoch % 1 == 0:
             samples = gen_fn(lasagne.utils.floatX(np.random.rand(100, 100)))
             import matplotlib.pyplot as plt
-            plt.imsave('./gen_images/' + prefix + '.png',
+            plt.imsave('/home/devon/Outs/mnist_bgan_2/' + prefix + '.png',
                        (samples.reshape(10, 10, 28, 28)
                         .transpose(0, 2, 1, 3)
                         .reshape(10 * 28, 10 * 28)),
