@@ -24,7 +24,7 @@ from lasagne.layers.dnn import Conv2DDNNLayer as Conv2DLayer
 from lasagne.nonlinearities import LeakyRectify, sigmoid
 floatX = theano.config.floatX
 data_name = "celeba_64.hdf5"
-
+gamma = 0.5
 
 # ############################# Batch iterator ###############################
 # This is just a simple helper function iterating over training data in
@@ -204,7 +204,7 @@ def norm_exp(log_factor):
     w_tilde  = T.exp(log_w)
     return w_tilde
 
-def reweighted_loss(fake_out):
+def reweighted_loss(fake_out, log_z_var):
     log_d1 = -T.nnet.softplus(-fake_out)  # -D_cell.neg_log_prob(1., P=d)
     log_d0 = -(fake_out+T.nnet.softplus(-fake_out))  # -D_cell.neg_log_prob(0., P=d)
     log_w = log_d1 - log_d0
@@ -212,11 +212,11 @@ def reweighted_loss(fake_out):
     # Find normalized weights.
     log_N = T.log(log_w.shape[0]).astype(floatX)
     log_Z_est = log_sum_exp(log_w - log_N, axis=0)
-    log_w_tilde = log_w - T.shape_padleft(log_Z_est) - log_N
 
-    cost = ((log_w - T.maximum(log_Z_est, -2)) ** 2).mean()
+    log_z_var = gamma*log_Z_est + gamma*log_z_var
+    cost = 0.5*((log_w - T.maximum(log_z_var, -2)) ** 2).mean()
 
-    return cost
+    return cost, log_z_var
 
 
 def train(num_epochs,
@@ -244,6 +244,8 @@ def train(num_epochs,
     # Prepare Theano variables for inputs and targets
     noise_var = T.matrix('noise')
     input_var = T.tensor4('inputs')
+    log_z_var = T.tensor('log_z_var')
+    log_z_val = 0
     #target_var = T.ivector('targets')
 
     # Create neural network model
@@ -260,7 +262,7 @@ def train(num_epochs,
                                          lasagne.layers.get_output(generator))
 
 
-    generator_loss = 0.5 * reweighted_loss(fake_out)
+    generator_loss, log_z_updated = reweighted_loss(fake_out, log_z_var)
     #generator_loss = (T.nnet.softplus(-fake_out)).mean() -- Original GAN loss
 
     # Create disc_loss
@@ -284,9 +286,10 @@ def train(num_epochs,
                                 allow_input_downcast=True,
                                updates=discriminator_updates)
 
-    train_generator = theano.function([noise_var],
+    train_generator = theano.function([noise_var, log_z_var],
                                [(fake_out < 0.).mean(),
-                                generator_loss],
+                                generator_loss,
+                                log_z_updated],
                                 allow_input_downcast=True,
                                updates=generator_updates)
 
@@ -320,7 +323,7 @@ def train(num_epochs,
             p_fake_array = []
 
             for i in range(num_iter_gen):
-                gen_train_out = train_generator(noise)
+                gen_train_out, log_z_val = train_generator(noise, log_z_val)
                 p_fake, gen_loss = gen_train_out
                 gen_loss_array.append(gen_loss)
                 p_fake_array.append(p_fake)
