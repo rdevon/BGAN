@@ -93,6 +93,7 @@ def load_stream(batch_size=None, source=None):
     
     train_data = H5PYDataset(source, which_sets=('train',))
     test_data = H5PYDataset(source, which_sets=('test',))
+
     num_train = train_data.num_examples
     num_test = test_data.num_examples
 
@@ -282,7 +283,6 @@ def GAN(fake_out, real_out):
     discriminator_loss = T.nnet.softplus(-real_out).mean() + (
         (T.nnet.softplus(-fake_out) + fake_out)).mean()
     return generator_loss, discriminator_loss, log_Z_est
-
 
 def train(num_epochs,
           filename,
