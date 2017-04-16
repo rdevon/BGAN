@@ -1,19 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
-"""
-Example employing Lasagne for digit generation using the MNIST dataset and
-Deep Convolutional Generative Adversarial Networks
-(DCGANs, see http://arxiv.org/abs/1511.06434).
-It is based on the MNIST example in Lasagne:
-http://lasagne.readthedocs.org/en/latest/user/tutorial.html
-Note: In contrast to the original paper, this trains the generator and
-discriminator at once, not alternatingly. It's easy to change, though.
-Jan Schlüter, 2015-12-16
-"""
 from __future__ import print_function
 
-import random
 import sys
 import os
 import time
@@ -21,79 +9,85 @@ import time
 import numpy as np
 import theano
 import theano.tensor as T
-import pylab as pl
+
 import lasagne
-import scipy.misc
-import cPickle
-import gzip
-from lasagne.layers import (InputLayer, ReshapeLayer,
-                            DenseLayer, batch_norm, GaussianNoiseLayer)
-from lasagne.layers.dnn import Conv2DDNNLayer as Conv2DLayer
-from lasagne.nonlinearities import LeakyRectify, sigmoid
-floatX = theano.config.floatX
 
-from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 
-#Dataset loader
-def load_dataset(source, mode):
-    print("Reading MNIST, ", mode)
-    with gzip.open(source, 'rb') as f:
-        x = cPickle.load(f)
+# ################## Download and prepare the MNIST dataset ##################
+# This is just some way of getting the MNIST dataset from an online location
+# and loading it into numpy arrays. It doesn't involve Lasagne at all.
 
-    if mode == 'train':
-        data = np.float32(x[0][0])
-    elif mode == 'valid':
-        data = np.float32(x[1][0])
-    elif mode == 'test':
-        data = np.float32(x[2][0])
+def load_dataset():
+    # We first define a download function, supporting both Python 2 and 3.
+    if sys.version_info[0] == 2:
+        from urllib import urlretrieve
     else:
-        raise ValueError()
+        from urllib.request import urlretrieve
 
-    data = np.reshape(data, (-1, 1, 28, 28))
-    return data
+    def download(filename, source='http://yann.lecun.com/exdb/mnist/'):
+        print("Downloading %s" % filename)
+        urlretrieve(source + filename, filename)
 
-#Dataset iterator
-def iterate_minibatches(inputs, batchsize, shuffle=False):
-    if shuffle:
-        indices = np.arange(len(inputs))
-        np.random.shuffle(indices)
-    for start_idx in range(0, len(inputs) - batchsize + 1, batchsize):
-        if shuffle:
-            excerpt = indices[start_idx:start_idx + batchsize]
-        else:
-            excerpt = slice(start_idx, start_idx + batchsize)
-        yield inputs[excerpt]
+    # We then define functions for loading MNIST images and labels.
+    # For convenience, they also download the requested files if needed.
+    import gzip
+
+    def load_mnist_images(filename):
+        if not os.path.exists(filename):
+            download(filename)
+        # Read the inputs in Yann LeCun's binary format.
+        with gzip.open(filename, 'rb') as f:
+            data = np.frombuffer(f.read(), np.uint8, offset=16)
+        # The inputs are vectors now, we reshape them to monochrome 2D images,
+        # following the shape convention: (examples, channels, rows, columns)
+        data = data.reshape(-1, 1, 28, 28)
+        # The inputs come as bytes, we convert them to float32 in range [0,1].
+        # (Actually to range [0, 255/256], for compatibility to the version
+        # provided at http://deeplearning.net/data/mnist/mnist.pkl.gz.)
+        return data / np.float32(256)
+
+    def load_mnist_labels(filename):
+        if not os.path.exists(filename):
+            download(filename)
+        # Read the labels in Yann LeCun's binary format.
+        with gzip.open(filename, 'rb') as f:
+            data = np.frombuffer(f.read(), np.uint8, offset=8)
+        # The labels are vectors of integers now, that's exactly what we want.
+        return data
+
+    # We can now download and read the training and test set images and labels.
+    X_train = load_mnist_images('train-images-idx3-ubyte.gz')
+    y_train = load_mnist_labels('train-labels-idx1-ubyte.gz')
+    X_test = load_mnist_images('t10k-images-idx3-ubyte.gz')
+    y_test = load_mnist_labels('t10k-labels-idx1-ubyte.gz')
+
+    # We reserve the last 10000 training examples for validation.
+    X_train, X_val = X_train[:-10000], X_train[-10000:]
+    y_train, y_val = y_train[:-10000], y_train[-10000:]
+
+    # We just return all the arrays in order, as expected in main().
+    # (It doesn't matter how we do this as long as we can read them again.)
+    return X_train, y_train, X_val, y_val, X_test, y_test
 
 
 # ##################### Build the neural network model #######################
 # We create two models: The generator and the discriminator network. The
 # generator needs a transposed convolution layer defined first.
 
-#Transponsed/fractional-strided convolutional layer
 class Deconv2DLayer(lasagne.layers.Layer):
-    def __init__(self, incoming, num_filters, filter_size, stride=1, pad=0, W=None, b=None,
+    def __init__(self, incoming, num_filters, filter_size, stride=1, pad=0,
                  nonlinearity=lasagne.nonlinearities.rectify, **kwargs):
         super(Deconv2DLayer, self).__init__(incoming, **kwargs)
         self.num_filters = num_filters
         self.filter_size = lasagne.utils.as_tuple(filter_size, 2, int)
         self.stride = lasagne.utils.as_tuple(stride, 2, int)
         self.pad = lasagne.utils.as_tuple(pad, 2, int)
-        if W is None:
-            self.W = self.add_param(lasagne.init.Orthogonal(),
-                                    (self.input_shape[1], num_filters) + self.filter_size,
-                                    name='W')
-        else:
-            self.W = self.add_param(W,
-                                    (self.input_shape[1], num_filters) + self.filter_size,
-                                    name='W')
-        if b is None:
-            self.b = self.add_param(lasagne.init.Constant(0),
-                                    (num_filters,),
-                                    name='b')
-        else:
-            self.b = self.add_param(b,
-                                    (num_filters,),
-                                    name='b')
+        self.W = self.add_param(lasagne.init.Orthogonal(),
+                                (self.input_shape[1], num_filters) + self.filter_size,
+                                name='W')
+        self.b = self.add_param(lasagne.init.Constant(0),
+                                (num_filters,),
+                                name='b')
         if nonlinearity is None:
             nonlinearity = lasagne.nonlinearities.identity
         self.nonlinearity = nonlinearity
@@ -131,8 +125,9 @@ def build_generator(input_var=None):
     layer = batch_norm(Deconv2DLayer(layer, 64, 5, stride=2, pad=2))
     layer = Deconv2DLayer(layer, 1, 5, stride=2, pad=2,
                           nonlinearity=sigmoid)
-    print ("Generator output:", layer.output_shape)
+    print("Generator output:", layer.output_shape)
     return layer
+
 
 def build_discriminator(input_var=None):
     from lasagne.layers import (InputLayer, Conv2DLayer, ReshapeLayer,
@@ -143,19 +138,41 @@ def build_discriminator(input_var=None):
     # input: (None, 1, 28, 28)
     layer = InputLayer(shape=(None, 1, 28, 28), input_var=input_var)
     # two convolutions
-    layer = Conv2DLayer(layer, 64, 5, stride=2, pad=2, nonlinearity=lrelu)
-    layer = Conv2DLayer(layer, 128, 5, stride=2, pad=2, nonlinearity=lrelu)
+    layer = batch_norm(Conv2DLayer(layer, 64, 5, stride=2, pad=2, nonlinearity=lrelu))
+    layer = batch_norm(Conv2DLayer(layer, 128, 5, stride=2, pad=2, nonlinearity=lrelu))
     # fully-connected layer
-    layer = DenseLayer(layer, 1024, nonlinearity=lrelu)
+    layer = batch_norm(DenseLayer(layer, 1024, nonlinearity=lrelu))
     # output layer
     layer = DenseLayer(layer, 1, nonlinearity=None)
-    print ("Discriminator output:", layer.output_shape)
+    print("Discriminator output:", layer.output_shape)
     return layer
 
 
+# ############################# Batch iterator ###############################
+# This is just a simple helper function iterating over training data in
+# mini-batches of a particular size, optionally in random order. It assumes
+# data is available as numpy arrays. For big datasets, you could load numpy
+# arrays as memory-mapped files (np.load(..., mmap_mode='r')), or write your
+# own custom data iteration function. For small datasets, you can also copy
+# them to GPU at once for slightly improved performance. This would involve
+# several changes in the main program, though, and is not demonstrated here.
+
+def iterate_minibatches(inputs, targets, batchsize, shuffle=False):
+    assert len(inputs) == len(targets)
+    if shuffle:
+        indices = np.arange(len(inputs))
+        np.random.shuffle(indices)
+    for start_idx in range(0, len(inputs) - batchsize + 1, batchsize):
+        if shuffle:
+            excerpt = indices[start_idx:start_idx + batchsize]
+        else:
+            excerpt = slice(start_idx, start_idx + batchsize)
+        yield inputs[excerpt], targets[excerpt]
+
+# ############################# BGAN Loss ###############################
+
 def log_sum_exp(x, axis=None):
     '''Numerically stable log( sum( exp(A) ) ).
-
     '''
     x_max = T.max(x, axis=axis, keepdims=True)
     y = T.log(T.sum(T.exp(x - x_max), axis=axis, keepdims=True)) + x_max
@@ -164,103 +181,91 @@ def log_sum_exp(x, axis=None):
 
 def norm_exp(log_factor):
     '''Gets normalized weights.
-
     '''
-    log_factor = log_factor - T.log(log_factor.shape[0]).astype(floatX)
+    log_factor = log_factor - T.log(log_factor.shape[0]).astype('float32')
     w_norm   = log_sum_exp(log_factor, axis=0)
     log_w    = log_factor - T.shape_padleft(w_norm)
     w_tilde  = T.exp(log_w)
     return w_tilde
 
-def reweighted_loss(fake_out):
+def BGAN(fake_out, real_out, log_Z):    
     log_d1 = -T.nnet.softplus(-fake_out)  # -D_cell.neg_log_prob(1., P=d)
     log_d0 = -fake_out - T.nnet.softplus(-fake_out)  # -D_cell.neg_log_prob(0., P=d)
     log_w = log_d1 - log_d0
 
     # Find normalized weights.
-    log_N = T.log(log_w.shape[0]).astype(floatX)
+    log_N = T.log(log_w.shape[0]).astype(log_w.dtype)
     log_Z_est = log_sum_exp(log_w - log_N, axis=0)
     log_Z_est = theano.gradient.disconnected_grad(log_Z_est)
-    log_w_tilde = log_w - T.shape_padleft(log_Z_est) - log_N
+         
+    generator_loss = ((fake_out - log_Z) ** 2).mean()
+    #generator_loss = (fake_out ** 2).mean()
+    discriminator_loss = T.nnet.softplus(-real_out).mean() + ((T.nnet.softplus(-fake_out) + fake_out)).mean()
+    return generator_loss, discriminator_loss, log_Z_est
 
-    #cost = (log_w ** 2).mean()
-    cost = ((log_w - T.maximum(log_Z_est, -2)) ** 2).mean()
-    #cost = ((fake_out - log_Z_est) ** 2).mean()
-    #cost = (fake_out ** 2).mean()
-    
-    return cost
+def GAN(fake_out, real_out):
+    log_d1 = -T.nnet.softplus(-fake_out)  # -D_cell.neg_log_prob(1., P=d)
+    log_d0 = -fake_out - T.nnet.softplus(-fake_out)  # -D_cell.neg_log_prob(0., P=d)
+    log_w = log_d1 - log_d0
+
+    # Find normalized weights.
+    log_N = T.log(log_w.shape[0]).astype(log_w.dtype)
+    log_Z_est = log_sum_exp(log_w - log_N, axis=0)
+    log_Z_est = theano.gradient.disconnected_grad(log_Z_est)
+         
+    generator_loss = T.nnet.softplus(-fake_out).mean()
+    discriminator_loss = T.nnet.softplus(-real_out).mean() + ((T.nnet.softplus(-fake_out) + fake_out)).mean()
+    return generator_loss, discriminator_loss, log_Z_est
 
 # ############################## Main program ################################
 # Everything else will be handled in our main program now. We could pull out
 # more functions to better separate the code, but it wouldn't make it any
 # easier to read.
 
-def main(num_epochs=40, n_samples=20, initial_eta=0.01):
+def main(num_epochs=200, initial_eta=0.005):
     # Load the dataset
     print("Loading data...")
-    #source = "/u/jacobath/cortex-data/basic/mnist.pkl.gz"
-    source = "/home/devon/Data/basic/mnist.pkl.gz"
-    X_train= load_dataset(source=source, mode="train")
+    X_train, y_train, X_val, y_val, X_test, y_test = load_dataset()
 
     # Prepare Theano variables for inputs and targets
     noise_var = T.matrix('noise')
     input_var = T.tensor4('inputs')
+    log_Z = theano.shared(lasagne.utils.floatX(0.), name='log_Z')
+
     # Create neural network model
-    
     print("Building model and compiling functions...")
     generator = build_generator(noise_var)
     discriminator = build_discriminator(input_var)
-    
-    print("Making RNG")
-    trng = RandomStreams(random.randint(1, 1000000))
-
-    # Sample
-    batch_size = noise_var.shape[0]
-    dim_c = input_var.shape[1]
-    dim_x = input_var.shape[2]
-    dim_y = input_var.shape[3]
-    
-    R = trng.uniform(size=(n_samples, batch_size, dim_c, dim_x, dim_y), dtype=floatX)
-
-    g_output = lasagne.layers.get_output(generator)
-    samples = (R <= T.shape_padleft(g_output)).astype(floatX)
 
     # Create expression for passing real data through the discriminator
     real_out = lasagne.layers.get_output(discriminator)
-    fake_out = lasagne.layers.get_output(
-        discriminator, samples.reshape(
-            (n_samples * batch_size, dim_c, dim_x, dim_y)))
-    
-    #Create gen_loss
-    # gen_loss = reweighted_loss(fake_out)
-    #generator_loss = reweighted_loss(fake_out) #0.5*(T.nnet.softplus(-fake_out)).mean()
-    generator_loss = T.nnet.softplus(-fake_out).mean()
+    # Create expression for passing fake data through the discriminator
+    fake_out = lasagne.layers.get_output(discriminator,
+                                         lasagne.layers.get_output(generator))
 
-    #Create disc_loss
-    discriminator_loss = (T.nnet.softplus(-real_out)).mean() + (T.nnet.softplus(-fake_out)).mean() + fake_out.mean()
+    # Create loss expressions
+    #generator_loss, discriminator_loss, log_Z_est = BGAN(fake_out, real_out, log_Z) 
+    generator_loss, discriminator_loss, log_Z_est = GAN(fake_out, real_out)
 
-    #Get generator and discriminator params
+    # Create update expressions for training
     generator_params = lasagne.layers.get_all_params(generator, trainable=True)
     discriminator_params = lasagne.layers.get_all_params(discriminator, trainable=True)
-
-    #Set optimizers and learning rates
     eta = theano.shared(lasagne.utils.floatX(initial_eta))
-    # Generator loss
     updates = lasagne.updates.adam(
-        generator_loss, generator_params, learning_rate=0.0001, beta1=0.5)
-
-    # Discriminator loss
+        generator_loss, generator_params, learning_rate=eta, beta1=0.5)
     updates.update(lasagne.updates.adam(
-        discriminator_loss, discriminator_params, learning_rate=0.0001, beta1=0.5))
+        discriminator_loss, discriminator_params, learning_rate=eta, beta1=0.5))
+    updates.update([(log_Z, 0.95 * log_Z + 0.05 * log_Z_est.mean())])
 
-    # Compile a training function
+    # Compile a function performing a training step on a mini-batch (by giving
+    # the updates dictionary) and returning the corresponding training loss:
     train_fn = theano.function([noise_var, input_var],
-                               [(real_out > 0.).mean(),
-                                (fake_out < 0.).mean(),
-                                generator_loss],
+                               [(T.nnet.sigmoid(real_out) > .5).mean(),
+                                (T.nnet.sigmoid(fake_out) < .5).mean(),
+                                log_Z, log_Z_est.mean()],
                                updates=updates)
 
-    # Compile another generating function
+    # Compile another function generating some data
     gen_fn = theano.function([noise_var],
                              lasagne.layers.get_output(generator,
                                                        deterministic=True))
@@ -273,26 +278,47 @@ def main(num_epochs=40, n_samples=20, initial_eta=0.01):
         train_err = 0
         train_batches = 0
         start_time = time.time()
-        for batch in iterate_minibatches(X_train, 128, shuffle=True):
-            inputs = np.array(batch, dtype=np.float32)
+        for batch in iterate_minibatches(X_train, y_train, 128, shuffle=True):
+            inputs, targets = batch
             noise = lasagne.utils.floatX(np.random.rand(len(inputs), 100))
-            train_err += np.array(train_fn(noise, inputs))
+            outs = train_fn(noise, inputs)
+            outs = [np.asarray(v) for v in outs]
+            train_err += np.array(outs)
             train_batches += 1
+
         # Then we print the results for this epoch:
         print("Epoch {} of {} took {:.3f}s".format(
             epoch + 1, num_epochs, time.time() - start_time))
         print("  training loss:\t\t{}".format(train_err / train_batches))
+
         # And finally, we plot some generated data
-        prefix = "%d_" % epoch
-        if epoch % 1 == 0:
-            samples = gen_fn(lasagne.utils.floatX(np.random.rand(100, 100)))
+        samples = gen_fn(lasagne.utils.floatX(np.random.rand(100, 100)))
+        try:
             import matplotlib.pyplot as plt
-            plt.imsave('/home/devon/Outs/mnist_bgan_2/' + prefix + '.png',
+        except ImportError:
+            pass
+        else:
+            plt.imsave('/home/devon/Outs/mnist_bgan_2/{}_.png'.format(epoch),
                        (samples.reshape(10, 10, 28, 28)
                         .transpose(0, 2, 1, 3)
                         .reshape(10 * 28, 10 * 28)),
                        cmap='gray')
 
+        # After half the epochs, we start decaying the learn rate towards zero
+        '''
+        if epoch >= num_epochs // 2:
+            progress = float(epoch) / num_epochs
+            eta.set_value(lasagne.utils.floatX(initial_eta * 2 * (1 - progress)))
+        '''
+
+    # Optionally, you could now dump the network weights to a file like this:
+    #np.savez('mnist_gen.npz', *lasagne.layers.get_all_param_values(generator))
+    #np.savez('mnist_disc.npz', *lasagne.layers.get_all_param_values(discriminator))
+    #
+    # And load them again later on like this:
+    # with np.load('model.npz') as f:
+    #     param_values = [f['arr_%d' % i] for i in range(len(f.files))]
+    # lasagne.layers.set_all_param_values(network, param_values)
 
 
 if __name__ == '__main__':
@@ -302,4 +328,7 @@ if __name__ == '__main__':
         print()
         print("EPOCHS: number of training epochs to perform (default: 100)")
     else:
-        main()
+        kwargs = {}
+        if len(sys.argv) > 1:
+            kwargs['num_epochs'] = int(sys.argv[1])
+        main(**kwargs)
