@@ -1,5 +1,5 @@
 import itertools
-import celeba
+import celeba#_mn as celeba
 import os
 import time
 
@@ -19,9 +19,9 @@ def main():
             gen_lr,
         )
 
-        #save_dir = 'celeba_4b'
-        save_dir = os.path.join('./save/', save_dir)
-        #save_dir = os.path.join('/home/devon/Outs/', save_dir)
+        save_dir = 'celeba_4b'
+        #save_dir = os.path.join('./save/', save_dir)
+        save_dir = os.path.join('/data/lisatmp2/hjelmdev/outs/', save_dir)
         binary_dir = save_dir + '/binaries/'
         image_dir = save_dir + '/images/'
         gt_image_dir = save_dir + '/gt_images/'

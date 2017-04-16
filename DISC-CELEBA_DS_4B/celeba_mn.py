@@ -397,10 +397,8 @@ def train(num_epochs,
                                updates=generator_updates)
 
     # Compile another function generating some data
-
     g_output_s = lasagne.layers.get_output(generator, deterministic=True)
     gen_fn = theano.function([noise_var], g_output_s) 
-
     f_test = theano.function([noise_var, input_var], [g_output[0, :, 10, 10], samples[:, 0, :, 10, 10]])
     
     # Finally, launch the training loop.
@@ -410,7 +408,6 @@ def train(num_epochs,
     # We iterate over epochs:
 
     samples = gen_fn(lasagne.utils.floatX(np.random.rand(50, 100)))
-    print(samples.size)
     
     for epoch in range(num_epochs):
         # In each epoch, we do a full pass over the training data:

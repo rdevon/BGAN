@@ -54,7 +54,7 @@ class To8Bit(Transformer):
             #img = img.resize((32, 32), Image.ANTIALIAS)
             img = img.convert(mode='P', palette=Image.WEB, colors=16)
             arr = np.array(img)
-            example[index] = (((arr[:, :, None] & (1 << np.arange(4)))) > 0).astype(int).transpose(2, 0, 1)
+            example[index] = arr
             example = tuple(example)
         return example
     
@@ -67,10 +67,11 @@ class To8Bit(Transformer):
                 #print(arr[:, 0, 0])
                 img = Image.fromarray(arr.transpose(1, 2, 0))
                 img = img.resize((32, 32), Image.ANTIALIAS)
-                img = img.quantize(palette=self.img)
+                img = img.quantize(palette=self.img, colors=16)
                 arr = np.array(img)
-                new_arr.append((((arr[:, :, None] & (1 << np.arange(4)))) > 0).astype(int))
-            batch[index] = np.array(new_arr).transpose(0, 3, 1, 2)
+                arr[arr > 15] = 0 #HACK don't know why it's giving more colors sometimes
+                new_arr.append(arr)
+            batch[index] = np.array(new_arr)[:, None, :, :]
             batch = tuple(batch)
         return batch
 
@@ -99,12 +100,6 @@ def load_stream(batch_size=128, path="/data/lisa/data/", img=None):
     test_stream = To8Bit(img=img, data_stream=DataStream(
         test_data, iteration_scheme=test_scheme))
     return train_stream, test_stream
-
-def transform(image):
-    return np.array(image) / 127.5 - 1.  # seems like normalization
-
-def inverse_transform(image):
-    return (np.array(image) + 1.) * 127.5
 
 # ##################### Build the neural network model #######################
 # We create two models: The generator and the discriminator network. The
@@ -159,7 +154,7 @@ class Deconv2DLayer(lasagne.layers.Layer):
 def build_discriminator(input_var=None):
 
     lrelu = LeakyRectify(0.2)
-    layer = InputLayer(shape=(None, 4, 32, 32), input_var=input_var)
+    layer = InputLayer(shape=(None, 1, 32, 32), input_var=input_var)
     # two convolutions
     layer = Conv2DLayer(layer, 128, 5, stride=2, pad=2, nonlinearity=lrelu)
     
@@ -220,7 +215,7 @@ def build_generator(parameter, input_var=None):
     layer = batch_norm(layer, beta=parameter['beta3'], gamma=parameter['gamma3'],
                        mean=parameter['mean3'], inv_std=parameter['inv_std3'])
     
-    layer = Deconv2DLayer(layer, 4, 5, stride=2, pad=2, nonlinearity=sigmoid)
+    layer = Deconv2DLayer(layer, 16, 5, stride=2, pad=2, nonlinearity=sigmoid)
     parameter['W4'] = layer.W
     parameter['b4'] = layer.b
     # shape=(batch,1,28,28)
@@ -232,8 +227,6 @@ def print_images(images, num_x, num_y, file='./'):
                       (images.reshape(num_x, num_y, 3, 32, 32)
                        .transpose(0, 3, 1, 4, 2)
                        .reshape(num_x * 32, num_y * 32, 3)))
-
-
 
 def log_sum_exp(x, axis=None):
     '''Numerically stable log( sum( exp(A) ) ).
@@ -269,10 +262,8 @@ def reweighted_loss(fake_out):
     return cost
 
 def convert_to_rgb(samples, img):
-    arr = np.zeros((samples.shape[0], samples.shape[1] * 2, samples.shape[2], samples.shape[3]))
-    arr[:, 4:] = samples[:, ::-1]
-    samples = np.packbits(arr.astype('int8'), axis=1)[:, 0]
     new_samples = []
+    samples = samples[:, 0].astype('uint8')
     for sample in samples:
         img2 = Image.fromarray(sample)
         img2.putpalette(img.getpalette())
@@ -293,7 +284,7 @@ def train(num_epochs,
           image_dir=None,
           binary_dir=None,
           gt_image_dir=None):
-    
+
     f = h5py.File('/data/lisa/data/celeba_64.hdf5', 'r')
     #f = h5py.File('/home/devon/Data/basic/celeba_64.hdf5', 'r')
     #arr = f['features'][0]
@@ -302,7 +293,6 @@ def train(num_epochs,
     arr = arr.transpose(0, 2, 3, 1)
     arr = arr.reshape((arr.shape[0] * arr.shape[1], arr.shape[2], arr.shape[3]))
     img = Image.fromarray(arr).convert('P', palette=Image.ADAPTIVE, colors=16)
-
     
     # Load the dataset
     log_file = open(filename, 'w')
@@ -331,28 +321,34 @@ def train(num_epochs,
 
     # Sample
     batch_size = noise_var.shape[0]
-    dim_c = input_var.shape[1]
     dim_x = input_var.shape[2]
     dim_y = input_var.shape[3]
-    
-    R = trng.uniform(size=(n_samples, batch_size, dim_c, dim_x, dim_y), dtype=floatX)
 
     g_output = lasagne.layers.get_output(generator)
-    samples = (R <= T.shape_padleft(g_output)).astype(floatX)
-
+    p_p = T.shape_padleft(g_output.transpose(0, 2, 3, 1))
+    p_t = T.zeros((n_samples, batch_size, dim_x, dim_y, 16)) + p_p
+    p = p_t.reshape((-1, 16))
+    samples_ = trng.multinomial(pvals=p).astype(floatX)
+    samples = samples_.argmax(axis=1).astype(floatX)
+    samples = theano.gradient.disconnected_grad(samples)
+    samples = samples.reshape((n_samples, batch_size, 1, dim_x, dim_y))
+    samples_ = samples_.reshape((n_samples, batch_size, 16, dim_x, dim_y))
+    #samples = (R <= T.shape_padleft(g_output)).astype(floatX)
+    
     # Create expression for passing real data through the discriminator
     real_out = lasagne.layers.get_output(discriminator)
     fake_out = lasagne.layers.get_output(
         discriminator, samples.reshape(
-            (n_samples * batch_size, dim_c, dim_x, dim_y)))
+            (n_samples * batch_size, 1, dim_x, dim_y)))
     fake_out_ = fake_out.reshape((n_samples, batch_size))
     
     log_d1 = -T.nnet.softplus(-fake_out_)
     log_d0 = -(fake_out_ + T.nnet.softplus(-fake_out_))
     log_w = log_d1 - log_d0
     g_output_ = T.shape_padleft(T.clip(g_output, 1e-7, 1. - 1e-7))
-    log_g = (samples * T.log(g_output_) + (1. - samples) * T.log(1. - g_output_)).sum(axis=(2, 3, 4))
-
+    log_g = (samples_ * T.log(g_output_) + (1. - samples_) * T.log(1. - g_output_)).sum(axis=(2, 3, 4))
+    f_test = theano.function([input_var, noise_var], log_g, on_unused_input='ignore')
+    
     # Find normalized weights.
     log_N = T.log(log_w.shape[0]).astype(floatX)
     #log_Z_est = T.maximum(log_sum_exp(log_w - log_N, axis=0), -4)

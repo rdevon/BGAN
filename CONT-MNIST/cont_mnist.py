@@ -16,6 +16,7 @@ from __future__ import print_function
 import random
 import sys
 import os
+from os import path
 import time
 
 import numpy as np
@@ -36,7 +37,7 @@ from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 
 #Dataset loader
 def load_dataset(source, mode):
-    print("Reading MNIST, ", mode)
+    print("Reading MNIST, from {} ({})".format(source, mode))
     with gzip.open(source, 'rb') as f:
         x = cPickle.load(f)
 
@@ -182,8 +183,9 @@ def reweighted_loss(fake_out):
     log_Z_est = log_sum_exp(log_w - log_N, axis=0)
     log_w_tilde = log_w - T.shape_padleft(log_Z_est) - log_N
 
-    cost = ((log_w - T.maximum(log_Z_est, -2)) ** 2).mean()
-
+    #cost = ((log_w - T.maximum(log_Z_est, -2)) ** 2).mean()
+    cost = (log_Z_est ** 2).mean()
+    
     return cost
 
 # ############################## Main program ################################
@@ -191,10 +193,10 @@ def reweighted_loss(fake_out):
 # more functions to better separate the code, but it wouldn't make it any
 # easier to read.
 
-def main(num_epochs=40, n_samples=20, initial_eta=0.0001):
+def main(source, out_dir, num_epochs=100, n_samples=20, initial_eta=0.0001):
     # Load the dataset
     print("Loading data...")
-    source = "/u/jacobath/cortex-data/basic/mnist.pkl.gz"
+    source = source
     X_train= load_dataset(source=source, mode="train")
 
     # Prepare Theano variables for inputs and targets
@@ -229,7 +231,7 @@ def main(num_epochs=40, n_samples=20, initial_eta=0.0001):
 
     #Create gen_loss
     # gen_loss = reweighted_loss(fake_out)
-    generator_loss = reweighted_loss(fake_out) #0.5*(T.nnet.softplus(-fake_out)).mean()
+    generator_loss = 0.5 * reweighted_loss(fake_out) #0.5*(T.nnet.softplus(-fake_out)).mean()
 
     #Create disc_loss
     discriminator_loss = (T.nnet.softplus(-real_out)).mean() + (T.nnet.softplus(-fake_out)).mean() + fake_out.mean()
@@ -279,7 +281,7 @@ def main(num_epochs=40, n_samples=20, initial_eta=0.0001):
         if epoch % 1 == 0:
             samples = gen_fn(lasagne.utils.floatX(np.random.rand(100, 100)))
             import matplotlib.pyplot as plt
-            plt.imsave('./gen_images/' + prefix + '.png',
+            plt.imsave(path.join(out_dir, prefix + '.png'),
                        (samples.reshape(10, 10, 28, 28)
                         .transpose(0, 2, 1, 3)
                         .reshape(10 * 28, 10 * 28)),
@@ -294,4 +296,4 @@ if __name__ == '__main__':
         print()
         print("EPOCHS: number of training epochs to perform (default: 100)")
     else:
-        main()
+        main(sys.argv[1], sys.argv[2])

@@ -35,7 +35,7 @@ data_name = "celeba_64.hdf5"
 # them to GPU at once for slightly improved performance. This would involve
 # several changes in the main program, though, and is not demonstrated here.
 
-def load_stream(batch_size=64, path="/home/devon/Data/basic/"):
+def load_stream(batch_size=64, path="/data/lisa/data"):
     path = os.path.join(path, data_name)
     train_data = H5PYDataset(path, which_sets=('train',))
     test_data = H5PYDataset(path, which_sets=('test',))
@@ -214,8 +214,10 @@ def reweighted_loss(fake_out):
     log_Z_est = log_sum_exp(log_w - log_N, axis=0)
     log_w_tilde = log_w - T.shape_padleft(log_Z_est) - log_N
 
-    cost = ((log_w - T.maximum(log_Z_est, -2)) ** 2).mean()
-
+    #cost = (log_w ** 2).mean()
+    #cost = ((log_w - T.maximum(log_Z_est, -2)) ** 2).mean()
+    cost = (log_Z_est ** 2).mean()
+    
     return cost
 
 
@@ -226,7 +228,7 @@ def train(num_epochs,
           beta_1_disc=0.5,
           print_freq=200,
           disc_lr=1e-5,
-          num_iter_gen = 2,
+          num_iter_gen=1,
           image_dir=None,
           binary_dir=None):
 
