@@ -116,7 +116,8 @@ class To8Bit(Transformer):
             new_arr = []
             for arr in batch[index]:
                 img = Image.fromarray(arr.transpose(1, 2, 0))
-                img = img.resize((DIM_X, DIM_Y), Image.ANTIALIAS)
+                if img.size[0] != DIM_X:
+                    img = img.resize((DIM_X, DIM_Y), Image.ANTIALIAS)
                 img = img.quantize(palette=self.img, colors=N_COLORS)
                 arr = np.array(img)
                 arr[arr > (N_COLORS - 1)] = 0 #HACK don't know why it's giving more colors sometimes
@@ -354,7 +355,7 @@ def summarize(results, samples, gt_samples, train_batches=None,
     
     if gt_image_dir is not None:
         samples_print_gt = convert_to_rgb(gt_samples, img)
-        print_images(samples_print, 8, 8, file=path.join(
+        print_images(samples_print_gt, 8, 8, file=path.join(
             gt_image_dir, '{}_{}_gt.png'.format(prefix, train_batches)))
 
 def main(source=None, num_epochs=None,
@@ -438,8 +439,7 @@ def main(source=None, num_epochs=None,
                                                         dim_noise))
             outs = train_fn(batch[0].astype(floatX), noise)
             update_dict_of_lists(results, **outs)
-            u += 1
-            pbar.update(u)
+            
             if u % summary_updates == 0:
                 try:
                     samples = gen_fn(lasagne.utils.floatX(
@@ -450,6 +450,9 @@ def main(source=None, num_epochs=None,
                 except Exception as e:
                     print(e)
                     pass
+            
+            u += 1
+            pbar.update(u)
                 
         logger.info('Epoch {} of {} took {:.3f}s'.format(
             epoch + 1, num_epochs, time.time() - start_time))
@@ -465,7 +468,7 @@ def main(source=None, num_epochs=None,
                  *lasagne.layers.get_all_param_values(generator))
 
 _defaults = dict(
-    learning_rate=1e-4,
+    learning_rate=1e-3,
     beta=0.5,
     num_epochs=100,
     dim_noise=100,
