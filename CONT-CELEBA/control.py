@@ -15,9 +15,9 @@ def main():
 
         current_time = time.time()
 
-        save_dir = 'celeba_orig'
+        save_dir = 'celeba_new'
 
-        save_dir = os.path.join('/home/devon/Outs/', save_dir)
+        save_dir = os.path.join('/data/lisatmp2/hjelmdev/outs/', save_dir)
         binary_dir = save_dir +  '/binaries/'
         image_dir = save_dir + '/images/'
         log_dir = save_dir + '/logs'

@@ -17,7 +17,7 @@ def main():
 
         save_dir = "celeba_rw_ds"
 
-        save_dir = os.path.join('/home/devon/Outs/', save_dir)
+        save_dir = os.path.join('/data/lisatmp2/hjelmdev/outs/', save_dir)
         binary_dir = save_dir +  '/binaries/'
         image_dir = save_dir + '/images/'
         gt_image_dir = save_dir + '/gt_images/'

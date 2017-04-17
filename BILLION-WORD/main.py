@@ -2,22 +2,27 @@
 
 '''
 
+import argparse
+import cPickle as pickle
 import datetime
 import logging
+import os
+from os import path
 import sys
 import time
-import os
 
+from collections import OrderedDict
 from fuel.datasets.hdf5 import H5PYDataset
 from fuel.schemes import ShuffledScheme, SequentialScheme
 from fuel.streams import DataStream
-from fuel.transformers import OneHotEncoding
+from fuel.transformers import SourcewiseTransformer
 import h5py
 import lasagne
 from lasagne.layers import (
-    batch_norm, Conv1DLayer, DenseLayer, GaussianNoiseLayer, InputLayer,
-    ReshapeLayer)
-from lasagne.nonlinearities import LeakyRectify, sigmoid, softmax
+    batch_norm, Conv1DLayer, DenseLayer, ElemwiseSumLayer,
+    GaussianNoiseLayer, InputLayer, NonlinearityLayer, ReshapeLayer)
+from lasagne.nonlinearities import (
+    LeakyRectify, rectify, sigmoid, softmax)
 import numpy as np
 from PIL import Image
 from progressbar import Bar, ProgressBar, Percentage, Timer
@@ -30,6 +35,9 @@ import scipy.misc
 
 floatX = theano.config.floatX
 lrelu = LeakyRectify(0.2)
+
+N_WORDS = 192
+L_GEN = 32
 
 # ##################### UTIL #####################
 
@@ -89,41 +97,89 @@ def update_dict_of_lists(d_to_update, **d):
             
 # ##################### DATA #####################
 
+class OneHotEncoding(SourcewiseTransformer):
+    """Converts integer target variables to one hot encoding.
+
+    It assumes that the targets are integer numbers from 0,... , N-1.
+    Since it works on the fly the number of classes N needs to be
+    specified.
+
+    Batch input is assumed to be of shape (N,) or (N, 1).
+
+    Parameters
+    ----------
+    data_stream : :class:`DataStream` or :class:`Transformer`.
+        The data stream.
+    num_classes : int
+        The number of classes.
+
+    """
+    def __init__(self, data_stream, num_classes, **kwargs):
+        if data_stream.axis_labels:
+            kwargs.setdefault('axis_labels', data_stream.axis_labels.copy())
+        super(OneHotEncoding, self).__init__(
+            data_stream, data_stream.produces_examples, **kwargs)
+        self.num_classes = num_classes
+
+    def transform_source_example(self, source_example, source_name):
+        if source_example >= self.num_classes:
+            raise ValueError("source_example ({}) must be lower than "
+                             "num_classes ({})".format(source_example,
+                                                       self.num_classes))
+        output = np.zeros((1, self.num_classes))
+        output[0, source_example] = 1
+        return output
+
+    def transform_source_batch(self, source_batch, source_name):
+        if np.max(source_batch) >= self.num_classes:
+            raise ValueError("all entries in source_batch must be lower than "
+                             "num_classes ({})".format(self.num_classes))
+        shape = source_batch.shape
+        source_batch = source_batch.flatten()
+        output = np.zeros((source_batch.shape[0], self.num_classes),
+                          dtype=source_batch.dtype)
+        
+        for i in range(self.num_classes):
+            output[source_batch == i, i] = 1
+        output = output.reshape((shape[0], shape[1], self.num_classes))
+        return output.transpose(0, 2, 1)
+
 def load_stream(batch_size=64, source=None):
     if source is None:
         raise ValueError('Source not set.')
-    data = np.load(source)
-    f = h5py.File('dataset.hdf5', mode='w')
-    
-    image_features = f.create_dataset(
-        'features', data.shape, dtype=data.dtype)
-    image_features[...] = data
-    
-    train_scheme = ShuffledScheme(examples=data.shape[0], batch_size=batch_size)
-    train_stream = OneHotEncoding(data_stream=DataStream(
-        data, iteration_scheme=train_scheme), num_classes=N_WORDS)
-    return train_stream
+    train_data = H5PYDataset(source, which_sets=('train',))
+    train_scheme = ShuffledScheme(examples=train_data.num_examples, batch_size=batch_size)
+    train_stream = OneHotEncoding(DataStream(train_data, iteration_scheme=train_scheme), N_WORDS)
+    return train_stream, train_data.num_examples
             
 # ##################### MODEL #####################
 
-def build_generator(parameter, input_var=None):
+def build_generator(input_var=None, dim_h=512):
     layer = InputLayer(shape=(None, 100), input_var=input_var)
 
     # fully-connected layer
-    layer = DenseLayer(layer, 256 * 128)
-    layer = ReshapeLayer(layer, ([0], 64, 256))
-    layer = batch_norm(Conv1DLayer(layer, 32, 5, stride=2, pad=2))
-    layer = batch_norm(Conv1DLayer(layer, 16, 5, stride=2, pad=2))
-    layer = batch_norm(Conv1DLayer(layer, N_WORDS, 5, stride=2, pad=2,
-                                   nonlinearity=None))
+    #batch_norm = lambda x: x
+    layer = batch_norm(DenseLayer(layer, dim_h * L_GEN, nonlinearity=None))
+    layer = ReshapeLayer(layer, ([0], dim_h, L_GEN))
+    for i in range(5):
+        layer_ = NonlinearityLayer(layer, rectify)
+        layer_ = batch_norm(Conv1DLayer(layer_, dim_h, 5, stride=1, pad=2))
+        layer_ = batch_norm(Conv1DLayer(layer_, dim_h, 5, stride=1, pad=2, nonlinearity=None))
+        layer = ElemwiseSumLayer([layer, layer_])
+    layer = NonlinearityLayer(layer, rectify)
+    layer = batch_norm(Conv1DLayer(layer, N_WORDS, 5, stride=1, pad=2, nonlinearity=None))
     logger.debug('Generator output: {}'.format(layer.output_shape))
     return layer
 
-def build_discriminator(input_var=None):
-    layer = InputLayer(shape=(None, N_WORDS, 32), input_var=input_var)
-    layer = Conv1DLayer(layer, 128, 5, stride=2, pad=2, nonlinearity=lrelu)
-    layer = Conv1DLayer(layer, 128 * 2, 5, stride=2, pad=2, nonlinearity=lrelu)
-    layer = Conv1DLayer(layer, 128 * 4, 5, stride=2, pad=2, nonlinearity=lrelu)
+def build_discriminator(input_var=None, dim_h=512):
+    layer = InputLayer(shape=(None, N_WORDS, L_GEN), input_var=input_var)
+    layer = Conv1DLayer(layer, dim_h, 5, stride=1, pad=2, nonlinearity=None)
+    for i in range(5):
+        layer_ = NonlinearityLayer(layer, lrelu)
+        layer_ = batch_norm(Conv1DLayer(layer_, dim_h, 5, stride=1, pad=2))
+        layer_ = batch_norm(Conv1DLayer(layer_, dim_h, 5, stride=1, pad=2, nonlinearity=None))
+        layer = ElemwiseSumLayer([layer, layer_])
+    layer = NonlinearityLayer(layer, lrelu)
     layer = DenseLayer(layer, 1, nonlinearity=None)
     
     logger.debug('Discriminator output: {}'.format(layer.output_shape))
@@ -161,76 +217,119 @@ def norm_exp(log_factor):
 
 # ##################### LOSS #####################
 
-def BGAN(discriminator, g_output_logit, n_samples):
+def BGAN(discriminator, g_output_logit, n_samples, trng, batch_size=64):
+    d = OrderedDict()
+    d['g_output_logit'] = g_output_logit
     g_output_logit_ = g_output_logit.transpose(0, 2, 1)
     g_output_logit_ = g_output_logit_.reshape((-1, N_WORDS))
+    d['g_output_logit_'] = g_output_logit_
     
     g_output = T.nnet.softmax(g_output_logit_)
-    g_output = g_output.reshape((-1, L_GEN, N_WORDS))
+    g_output = g_output.reshape((batch_size, L_GEN, N_WORDS))
+    d['g_output'] = g_output
     
-    p_p = T.shape_padleft(g_output)
-    g_output = g_output.transpose(0, 2, 1)
-    p_t = T.zeros((n_samples, batch_size, L_GEN, N_WORDS)) + p_p
+    p_t = T.tile(T.shape_padleft(g_output), (n_samples, 1, 1, 1))
+    d['p_t'] = p_t
     p = p_t.reshape((-1, N_WORDS))
+    d['p'] = p
     
     samples = trng.multinomial(pvals=p).astype(floatX)
     samples = theano.gradient.disconnected_grad(samples)
-    samples = samples.reshape((n_samples, -1, L_GEN, N_WORDS))
-    samples = samples.transpose(0, 1, 3, 2)
+    samples = samples.reshape((n_samples, batch_size, L_GEN, N_WORDS))
+    d['samples'] = samples
     
     D_r = lasagne.layers.get_output(discriminator)
     D_f = lasagne.layers.get_output(
-        discriminator, samples.reshape((-1, N_WORDS, L_GEN)))
+        discriminator,
+        samples.transpose(0, 1, 3, 2).reshape((-1, N_WORDS, L_GEN)))
     D_f_ = D_f.reshape((n_samples, -1))
+    d.update(D_r=D_r, D_f=D_f, D_f_=D_f_)
     
-    log_d1 = -T.nnet.softplus(-fake_out_)
-    log_d0 = -(D_f_ + T.nnet.softplus(-fake_out_))
-    log_w = fake_out_
+    log_d1 = -T.nnet.softplus(-D_f_)
+    log_d0 = -(D_f_ + T.nnet.softplus(-D_f_))
+    log_w = D_f_
+    d.update(log_d1=log_d1, log_d0=log_d0, log_w=log_w)
 
     log_N = T.log(log_w.shape[0]).astype(log_w.dtype)
     log_Z_est = log_sum_exp(log_w - log_N, axis=0)
     log_Z_est = theano.gradient.disconnected_grad(log_Z_est)
-    
+    d['log_Z_est'] = log_Z_est
+
+    g_output_logit = g_output_logit.transpose(0, 2, 1)
     log_g = (samples * (g_output_logit - log_sum_exp2(
-        g_output_logit, axis=1))[None, :, :, :]).sum(axis=(2, 3))
-         
+        g_output_logit, axis=2))[None, :, :, :]).sum(axis=(2, 3))
+    d['log_g'] = log_g
+    
     log_N = T.log(log_w.shape[0]).astype(floatX)
     log_Z_est = log_sum_exp(log_w - log_N, axis=0)
     log_w_tilde = log_w - T.shape_padleft(log_Z_est) - log_N
     w_tilde = T.exp(log_w_tilde)
     w_tilde_ = theano.gradient.disconnected_grad(w_tilde)
+    d.update(log_w_tilde=log_w_tilde, w_tilde=w_tilde)
     
     generator_loss = -(w_tilde_ * log_g).sum(0).mean()
-    discriminator_loss = (T.nnet.softplus(-real_out)).mean() + (
-        T.nnet.softplus(-fake_out)).mean()
+    discriminator_loss = (T.nnet.softplus(-D_r)).mean() + (
+        T.nnet.softplus(-D_f)).mean()
     
-    return generator_loss, discriminator_loss, D_r, D_f, log_Z_est
+    return generator_loss, discriminator_loss, D_r, D_f, log_Z_est, d
 
 # MAIN -------------------------------------------------------------------------
 
-def main(source=None, num_epochs=None, gen_lr=None, beta_1_gen=None,
-         dim_noise=None, initial_eta=None, batch_size=None,
+def summarize(results, samples, gt_samples, r_vocab, out_dir=None):
+    results = dict((k, np.mean(v)) for k, v in results.items())    
+    logger.info(results)
+    
+    gt_samples = np.argmax(gt_samples, axis=1)
+    strs = []
+    for gt_sample in gt_samples:
+        s = ''.join([r_vocab[c] for c in gt_sample])
+        strs.append(s)
+    logger.info('GT:')
+    logger.info(strs)
+    
+    samples = np.argmax(samples, axis=1)
+    strs = []
+    for sample in samples:
+        s = ''.join([r_vocab[c] for c in sample])
+        strs.append(s)
+    logger.info('Samples:')
+    logger.info(strs)
+
+def main(source=None, vocab=None, num_epochs=None, gen_lr=None, beta_1_gen=None,
+         dim_noise=None, initial_eta=None, batch_size=None, n_samples=None,
          beta_1_disc=None, disc_lr=None, num_iter_gen=None, n_steps=None,
-         print_freq=None, image_dir=None, binary_dir=None, gt_image_dir=None):
+         print_freq=None, image_dir=None, binary_dir=None, gt_image_dir=None,
+         summary_updates=1000, debug=False):
     
     # Load the dataset
-    data = np.load(source)
-    train_samples = data.shape[0]
+    stream, train_samples = load_stream(source=source, batch_size=batch_size)
+    r_vocab = dict((v, k) for k, v in vocab.items())
     
     # VAR
-    noise_var = T.matrix('noise')
-    input_var = T.tensor4('inputs')
+    noise = T.matrix('noise')
+    input_var = T.tensor3('inputs')
     
     # MODELS
-    generator = build_generator(parameter, noise_var)
+    generator = build_generator(noise)
     discriminator = build_discriminator(input_var)
+    trng = RandomStreams(random.randint(1, 1000000))
 
     # GRAPH / LOSS    
     g_output_logit = lasagne.layers.get_output(generator)
     
-    generator_loss, discriminator_loss, D_r, D_f, log_Z_est = BGAN(
-        discriminator, g_output_logit, n_samples)
-    
+    generator_loss, discriminator_loss, D_r, D_f, log_Z_est, d = BGAN(
+        discriminator, g_output_logit, n_samples, trng)
+
+    if debug:
+        batch = stream.get_epoch_iterator().next()[0]
+        noise_ = lasagne.utils.floatX(np.random.rand(batch.shape[0],
+                                                     dim_noise))
+        print batch.shape
+        for k, v in d.items():
+            print 'Testing {}'.format(k)
+            f = theano.function([noise, input_var], v, on_unused_input='warn')
+            print k, f(noise_, batch.astype(floatX)).shape
+
     # OPTIMIZER
     discriminator_params = lasagne.layers.get_all_params(
         discriminator, trainable=True)
@@ -264,45 +363,44 @@ def main(source=None, num_epochs=None, gen_lr=None, beta_1_gen=None,
         start_time = time.time()
         
         # Train
+        u = 0
         results = {}
         widgets = ['Epoch {}, '.format(epoch), Timer(), Bar()]
         pbar = ProgressBar(
             widgets=widgets, maxval=(train_samples // batch_size)).start()
         
-        for batch in train_stream.get_epoch_iterator():
-            if batch0 is None: batch0 = batch
+        for batch in stream.get_epoch_iterator():
             noise = lasagne.utils.floatX(np.random.rand(batch[0].shape[0],
                                                         dim_noise))
-            outs = train_fn(*(list(batch)[::-1] + [noise]))
+            outs = train_fn(batch[0].astype(floatX), noise)
             update_dict_of_lists(results, **outs)
-            train_batches += 1
-            pbar.update(train_batches)
-        
-        # Summarize and print
-        results = dict((k, np.mean(v)) for k, v in results.items())
-
+            u += 1
+            pbar.update(u)
+            if u % summary_updates == 0:
+                try:
+                    samples = gen_fn(lasagne.utils.floatX(
+                        np.random.rand(10, dim_noise)))
+                    summarize(results, samples, batch[0][:10], r_vocab)
+                except:
+                    pass
         logger.info('Epoch {} of {} took {:.3f}s'.format(
             epoch + 1, num_epochs, time.time() - start_time))
-        logger.info(results)
-
-        # Plot
-        samples = gen_fn(lasagne.utils.floatX(np.random.rand(100, dim_noise)))
-        assert False, samples.shape
-
+        '''        
         if epoch >= num_epochs // 2:
             progress = float(epoch) / num_epochs
             eta.set_value(lasagne.utils.floatX(initial_eta * 2 * (1 - progress)))
-    
+        '''
+
 _defaults = dict(
-    gen_lr=5e-5,
+    gen_lr=1e-4,
     beta_1_gen=0.5,
     beta_1_disc=0.5,
-    disc_lr=5e-5,
+    disc_lr=1e-4,
     num_epochs=100,
     num_iter_gen=1,
-    dim_noise=64,
+    dim_noise=100,
     batch_size=64,
-    n_steps=2,
+    n_samples=20,
     initial_eta=1e-4,
     print_freq=50
 )
@@ -323,6 +421,7 @@ def make_argument_parser():
                         help='Output path for stuff')
     parser.add_argument('-n', '--name', default=None)
     parser.add_argument('-S', '--source', type=str, default=None)
+    parser.add_argument('-V', '--vocab', type=str, default=None)
     parser.add_argument('-v', '--verbosity', type=int, default=1,
                         help='Verbosity of the logging. (0, 1, 2)')
     return parser
@@ -358,5 +457,8 @@ if __name__ == '__main__':
     kwargs = dict()
     kwargs.update(**_defaults)
     kwargs.update(out_paths)
+
+    with open('/data/lisa/data/1-billion-word/processed/one_billionr_voc_char.pkl') as f:
+        vocab = pickle.load(f)
         
-    main(source=args.source, **kwargs)
+    main(source=args.source, vocab=vocab, **kwargs)

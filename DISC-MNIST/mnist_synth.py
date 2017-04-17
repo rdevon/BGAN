@@ -136,6 +136,16 @@ def build_generator(input_var=None):
     print ("Generator output:", layer.output_shape)
     return layer
 
+def build_synth(input_dist=None):
+    from lasagne.layers import (InputLayer, DenseLayer, batch_norm, ReshapeLayer)
+    from lasagne.nonlinearities import LeakyRectify, rectify
+    lrelu = LeakyRectify(0.2)
+    layer = InputLayer(shape=(None, 1, 28, 28), input_var=input_dist)
+    layer = batch_norm(DenseLayer(layer, 1024, nonlinearity=lrelu))
+    layer = batch_norm(DenseLayer(layer, 1 * 28 * 28))#, nonlinearity=lrelu)
+    layer = ReshapeLayer(layer, ([0], 1, 28, 28))
+    return layer
+
 def build_discriminator(input_var=None):
     from lasagne.layers import (InputLayer, Conv2DLayer, ReshapeLayer,
                                 DenseLayer, batch_norm)
@@ -156,7 +166,6 @@ def build_discriminator(input_var=None):
     layer = DenseLayer(layer, 1, nonlinearity=None)
     print ("Discriminator output:", layer.output_shape)
     return layer
-
 
 def log_sum_exp(x, axis=None):
     '''Numerically stable log( sum( exp(A) ) ).
@@ -240,6 +249,8 @@ def train(num_epochs=200, n_samples=20, initial_eta=1e-4, plot_colour="-b",
     g_output = lasagne.layers.get_output(generator)
     samples = (R <= T.shape_padleft(g_output)).astype(floatX)
 
+    synth = build_synth(theano.gradient.disconnected_grad(g_output))
+    
     # Create expression for passing real data through the discriminator
     real_out = lasagne.layers.get_output(discriminator)
     fake_out = lasagne.layers.get_output(
@@ -260,8 +271,15 @@ def train(num_epochs=200, n_samples=20, initial_eta=1e-4, plot_colour="-b",
     w_tilde = T.exp(log_w_tilde)
     w_tilde_ = theano.gradient.disconnected_grad(w_tilde)
 
+    grad = theano.gradient.disconnected_grad(T.grad(log_g.sum(), g_output))
+    synth_out = lasagne.layers.get_output(synth)
+
+    grad_est = (w_tilde_[:, :, None, None, None] * grad[None, :, :, :, :]).mean(0)
+    synth_loss = 0.5 * ((grad_est - synth_out) ** 2).sum(axis=(1, 2, 3)).mean()
+    
     #Create gen_loss
-    generator_loss = -(w_tilde_ * log_g).sum(0).mean()
+    #generator_loss = -(w_tilde_ * log_g).sum(0).mean()
+    generator_loss = -(synth_out * g_output).sum()
 
     #Create disc_loss
     discriminator_loss = T.nnet.softplus(-real_out).mean() \
@@ -271,13 +289,16 @@ def train(num_epochs=200, n_samples=20, initial_eta=1e-4, plot_colour="-b",
     #Get generator and discriminator params
     generator_params = lasagne.layers.get_all_params(generator, trainable=True)
     discriminator_params = lasagne.layers.get_all_params(discriminator, trainable=True)
-
+    synth_params = lasagne.layers.get_all_params(synth, trainable=True)
+    
     #Set optimizers and learning rates
     eta = theano.shared(lasagne.utils.floatX(initial_eta))
     updates = lasagne.updates.rmsprop(
         generator_loss, generator_params, learning_rate=eta)
     updates.update(lasagne.updates.rmsprop(
         discriminator_loss, discriminator_params, learning_rate=eta))
+    updates.update(lasagne.updates.rmsprop(
+        synth_loss, synth_params, learning_rate=0.01))
 
     # Compile a training function
     train_fn = theano.function([noise_var, input_var],
@@ -287,8 +308,9 @@ def train(num_epochs=200, n_samples=20, initial_eta=1e-4, plot_colour="-b",
                                updates=updates)
 
     # Compile another generating function
-    gen_fn = theano.function(
-        [noise_var], lasagne.layers.get_output(generator, deterministic=True))
+    gen_fn = theano.function([noise_var],
+                             lasagne.layers.get_output(generator,
+                                                       deterministic=True))
 
     # Finally, launch the training loop.
     print("Starting training...")
