@@ -3,8 +3,8 @@ import celeba
 import os
 import time
 
-genlrlist = [1e-3]
-disclrlist = [1e-3]
+genlrlist = [5e-4]
+disclrlist = [5e-4]
 
 epochs = 200
 def main():

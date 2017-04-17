@@ -29,6 +29,8 @@ import scipy.misc
 
 
 floatX = theano.config.floatX
+DIM_X = 64
+DIM_Y = 64
 
 # ##################### UTIL #####################
 
@@ -112,7 +114,13 @@ def transform(image):
 def inverse_transform(image):
     return (np.array(image) + 1.) * 127.5
 
-# ##################### Build the neural network model #######################
+def print_images(images, num_x, num_y, file='./'):
+    scipy.misc.imsave(file,  # current epoch No.
+                      (images.reshape(num_x, num_y, 3, DIM_X, DIM_Y)
+                       .transpose(0, 3, 1, 4, 2)
+                       .reshape(num_x * DIM_X, num_y * DIM_Y, 3)))
+
+# ##################### MODEL #######################
 
 class Deconv2DLayer(lasagne.layers.Layer):
     def __init__(self, incoming, num_filters, filter_size, stride=1, pad=0, W=None, b=None,
@@ -160,80 +168,34 @@ class Deconv2DLayer(lasagne.layers.Layer):
             conved += self.b.dimshuffle('x', 0, 'x', 'x')
         return self.nonlinearity(conved)
 
-def build_discriminator(input_var=None):
+def build_discriminator(input_var=None, dim_h=128):
 
     lrelu = LeakyRectify(0.2)
     layer = InputLayer(shape=(None, 3, 64, 64), input_var=input_var)
-    layer = Conv2DLayer(layer, 128, 5, stride=2, pad=2, nonlinearity=lrelu)
-    layer = batch_norm(Conv2DLayer(layer, 128 * 2, 5, stride=2, pad=2, nonlinearity=lrelu))
-    layer = batch_norm(Conv2DLayer(layer, 128 * 4, 5, stride=2, pad=2, nonlinearity=lrelu))
-    layer = batch_norm(Conv2DLayer(layer, 128 * 8, 5, stride=2, pad=2, nonlinearity=lrelu))
+    layer = Conv2DLayer(layer, dim_h, 5, stride=2, pad=2, nonlinearity=lrelu)
+    layer = batch_norm(Conv2DLayer(layer, dim_h * 2, 5, stride=2, pad=2, nonlinearity=lrelu))
+    layer = batch_norm(Conv2DLayer(layer, dim_h * 4, 5, stride=2, pad=2, nonlinearity=lrelu))
+    layer = batch_norm(Conv2DLayer(layer, dim_h * 8, 5, stride=2, pad=2, nonlinearity=lrelu))
     layer = DenseLayer(layer, 1, nonlinearity=None)
     logger.debug('Discriminator output: {}' .format(layer.output_shape))
     return layer
 
-
-def initial_parameters():
-    parameter = {}
-    parameter['beta1'] = theano.shared(np.zeros(128 * 8 * 4 * 4).astype('float32'))
-    parameter['gamma1'] = theano.shared(np.ones(128 * 8 * 4 * 4).astype('float32'))
-    parameter['mean1'] = theano.shared(np.zeros(128 * 8 * 4 * 4).astype('float32'))
-    parameter['inv_std1'] = theano.shared(np.ones(128 * 8 * 4 * 4).astype('float32'))
-    parameter['beta2'] = theano.shared(np.zeros(128 * 4).astype('float32'))
-    parameter['gamma2'] = theano.shared(np.ones(128 * 4).astype('float32'))
-    parameter['mean2'] = theano.shared(np.zeros(128 * 4).astype('float32'))
-    parameter['inv_std2'] = theano.shared(np.ones(128 * 4).astype('float32'))
-    parameter['beta3'] = theano.shared(np.zeros(128 * 2).astype('float32'))
-    parameter['gamma3'] = theano.shared(np.ones(128 * 2).astype('float32'))
-    parameter['mean3'] = theano.shared(np.zeros(128 * 2).astype('float32'))
-    parameter['inv_std3'] = theano.shared(np.ones(128 * 2).astype('float32'))
-    parameter['beta4'] = theano.shared(np.zeros(128).astype('float32'))
-    parameter['gamma4'] = theano.shared(np.ones(128).astype('float32'))
-    parameter['mean4'] = theano.shared(np.zeros(128).astype('float32'))
-    parameter['inv_std4'] = theano.shared(np.ones(128).astype('float32'))
-    return parameter
-
-
-def build_generator(parameter, input_var=None):
+def build_generator(input_var=None, dim_h=128):
     from lasagne.layers import InputLayer, ReshapeLayer, DenseLayer, batch_norm
     from lasagne.nonlinearities import tanh
 
     layer = InputLayer(shape=(None, 100), input_var=input_var)
-    layer = DenseLayer(layer, 128 * 8 * 4 * 4)
-    parameter['W1'] = layer.W
-    parameter['b1'] = layer.b
-    layer = batch_norm(layer, beta=parameter['beta1'], gamma=parameter['gamma1'],
-                       mean=parameter['mean1'], inv_std=parameter['inv_std1'])
-    layer = ReshapeLayer(layer, ([0], 128 * 8, 4, 4))
-    layer = Deconv2DLayer(layer, 128 * 4, 5, stride=2, pad=2)
-    parameter['W2'] = layer.W
-    parameter['b2'] = layer.b
-    layer = batch_norm(layer, beta=parameter['beta2'], gamma=parameter['gamma2'],
-                       mean=parameter['mean2'], inv_std=parameter['inv_std2'])
-
-    layer = Deconv2DLayer(layer, 128 * 2, 5, stride=2, pad=2)
-    parameter['W3'] = layer.W
-    parameter['b3'] = layer.b
-    layer = batch_norm(layer, beta=parameter['beta3'], gamma=parameter['gamma3'],
-                       mean=parameter['mean3'], inv_std=parameter['inv_std3'])
-    layer = Deconv2DLayer(layer, 128, 5, stride=2, pad=2)
-    parameter['W4'] = layer.W
-    parameter['b4'] = layer.b
-    layer = batch_norm(layer, beta=parameter['beta4'], gamma=parameter['gamma4'],
-                       mean=parameter['mean4'], inv_std=parameter['inv_std4'])
-
+    layer = batch_norm(DenseLayer(layer, dim_h * 8 * 4 * 4))
+    layer = ReshapeLayer(layer, ([0], dim_h * 8, 4, 4))
+    layer = batch_norm(Deconv2DLayer(layer, dim_h * 4, 5, stride=2, pad=2))
+    layer = batch_norm(Deconv2DLayer(layer, dim_h * 2, 5, stride=2, pad=2))
+    layer = batch_norm(Deconv2DLayer(layer, dim_h, 5, stride=2, pad=2))
     layer = Deconv2DLayer(layer, 3, 5, stride=2, pad=2, nonlinearity=tanh)
-    parameter['W5'] = layer.W
-    parameter['b5'] = layer.b
     
     logger.debug('Generator output: {}'.format(layer.output_shape))
     return layer
 
-def print_images(images, num_x, num_y, file='./'):
-    scipy.misc.imsave(file,  # current epoch No.
-                      (images.reshape(num_x, num_y, 3, 64, 64)
-                       .transpose(0, 3, 1, 4, 2)
-                       .reshape(num_x * 64, num_y * 64, 3)))
+
 
 def log_sum_exp(x, axis=None):
     '''Numerically stable log( sum( exp(A) ) ).
@@ -274,7 +236,6 @@ def GAN(fake_out, real_out):
     log_d0 = -fake_out - T.nnet.softplus(-fake_out)
     log_w = log_d1 - log_d0
 
-    # Find normalized weights.
     log_N = T.log(log_w.shape[0]).astype(log_w.dtype)
     log_Z_est = log_sum_exp(log_w - log_N, axis=0)
     log_Z_est = theano.gradient.disconnected_grad(log_Z_est)
@@ -287,11 +248,11 @@ def GAN(fake_out, real_out):
 def train(num_epochs,
           filename,
           batch_size=64,
-          gen_lr=1e-3,
+          gen_lr=None,
           beta_1_gen=0.5,
           beta_1_disc=0.5,
           print_freq=200,
-          disc_lr=1e-3,
+          disc_lr=None,
           num_iter_gen=1,
           image_dir=None,
           binary_dir=None):
@@ -318,8 +279,7 @@ def train(num_epochs,
 
     # Create neural network model
     logger.info('Building model and compiling GAN functions...')
-    parameter = initial_parameters()
-    generator = build_generator(parameter, noise_var)
+    generator = build_generator(noise_var)
     discriminator = build_discriminator(input_var)
 
     real_out = lasagne.layers.get_output(discriminator)
@@ -334,7 +294,7 @@ def train(num_epochs,
 
     generator_updates = lasagne.updates.adam(
         generator_loss, generator_params, learning_rate=gen_lr, beta1=beta_1_gen)
-    generator_updates.update([(log_Z, 0.95 * log_Z + 0.05 * log_Z_est.mean())])
+    generator_updates.update([(log_Z, 0.995 * log_Z + 0.005 * log_Z_est.mean())])
     discriminator_updates = lasagne.updates.adam(
         discriminator_loss, discriminator_params, learning_rate=disc_lr, beta1=beta_1_disc)
 

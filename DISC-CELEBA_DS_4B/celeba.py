@@ -294,10 +294,7 @@ def train(num_epochs,
           binary_dir=None,
           gt_image_dir=None):
     
-    #f = h5py.File('/data/lisa/data/celeba_64.hdf5', 'r')
     f = h5py.File('/home/devon/Data/basic/celeba_64.hdf5', 'r')
-    #arr = f['features'][0]
-    #f = h5py.File('/home/devon/Data/basic/celeba_64.hdf5', 'r')
     arr = f['features'][:1000]
     arr = arr.transpose(0, 2, 3, 1)
     arr = arr.reshape((arr.shape[0] * arr.shape[1], arr.shape[2], arr.shape[3]))

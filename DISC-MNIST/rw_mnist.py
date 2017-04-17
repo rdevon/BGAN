@@ -269,9 +269,8 @@ def train(num_epochs=200, n_samples=20, initial_eta=1e-4, plot_colour="-b"):
                                updates=updates)
 
     # Compile another generating function
-    gen_fn = theano.function([noise_var],
-                             lasagne.layers.get_output(generator,
-                                                       deterministic=True))
+    gen_fn = theano.function(
+        [noise_var], lasagne.layers.get_output(generator, deterministic=True))
 
     # Finally, launch the training loop.
     print("Starting training...")

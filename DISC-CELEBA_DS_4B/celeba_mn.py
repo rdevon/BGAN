@@ -5,58 +5,107 @@
 from __future__ import print_function
 
 import datetime
+import logging
+import os
 import sys
 import time
-import os
 
 import h5py
-from progressbar import Bar, ProgressBar, Percentage, Timer
-import numpy as np
-import random
-import theano
-import theano.tensor as T
-from PIL import Image
-import pylab as pl
-import lasagne
-import scipy.misc
 from fuel.datasets.hdf5 import H5PYDataset
 from fuel.schemes import ShuffledScheme, SequentialScheme
 from fuel.streams import DataStream
 from fuel.transformers import Transformer
-
+import lasagne
 from lasagne.layers import (InputLayer, ReshapeLayer,
                                 DenseLayer, batch_norm, GaussianNoiseLayer)
 from lasagne.layers.dnn import Conv2DDNNLayer as Conv2DLayer
 from lasagne.nonlinearities import LeakyRectify, sigmoid, softmax
+import numpy as np
 from PIL import Image
-
+from progressbar import Bar, ProgressBar, Percentage, Timer
+import pylab as pl
+import random
+import theano
+import theano.tensor as T
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
+import scipy.misc
 
 
 floatX = theano.config.floatX
 data_name = "celeba_64.hdf5"
+lrelu = LeakyRectify(0.2)
 
+N_COLORS = 16
+DIM_X = 64
+DIM_Y = 64
+DIM_C = 3
+
+# ##################### UTIL #####################
+
+logging.basicConfig()
+logger = logging.getLogger(__name__)
+logger.propagate = False
+file_formatter = logging.Formatter(
+    '%(asctime)s:%(name)s[%(levelname)s]:%(message)s')
+stream_formatter = logging.Formatter(
+    '[%(levelname)s:%(name)s]:%(message)s' + ' ' * 40)
+
+def set_stream_logger(verbosity):
+    global logger
+
+    if verbosity == 0:
+        level = logging.WARNING
+        lstr = 'WARNING'
+    elif verbosity == 1:
+        level = logging.INFO
+        lstr = 'INFO'
+    elif verbosity == 2:
+        level = logging.DEBUG
+        lstr = 'DEBUG'
+    else:
+        level = logging.INFO
+        lstr = 'INFO'
+    logger.setLevel(level)
+    ch = logging.StreamHandler()
+    ch.terminator = ''
+    ch.setLevel(level)
+    ch.setFormatter(stream_formatter)
+    logger.addHandler(ch)
+    logger.info('Setting logging to %s' % lstr)
+
+def set_file_logger(file_path):
+    global logger
+    fh = logging.FileHandler(file_path)
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(file_formatter)
+    logger.addHandler(fh)
+    fh.terminator = ''
+    logger.info('Saving logs to %s' % file_path)
+    
+def update_dict_of_lists(d_to_update, **d):
+    '''Updates a dict of list with kwargs.
+
+    Args:
+        d_to_update (dict): dictionary of lists.
+        **d: keyword arguments to append.
+
+    '''
+    for k, v in d.iteritems():
+        if k in d_to_update.keys():
+            d_to_update[k].append(v)
+        else:
+            d_to_update[k] = [v]
+
+# ############################# DATA ###############################
 
 class To8Bit(Transformer):
-    def __init__(self, data_stream, img, **kwargs):
-        self.img = img
+    def __init__(self, data_stream, img, downsample=True, **kwargs):
         super(To8Bit, self).__init__(
             data_stream=data_stream,
-            produces_examples=data_stream.produces_examples,
+            produces_examples=False,
             **kwargs)
-        
-    def transform_example(self, example):
-        if 'features' in self.sources:
-            example = list(example)
-            index = self.sources.index('features')
-            arr = example[index]
-            img = Image.fromarray(arr.transpose(1, 2, 0))
-            #img = img.resize((32, 32), Image.ANTIALIAS)
-            img = img.convert(mode='P', palette=Image.WEB, colors=16)
-            arr = np.array(img)
-            example[index] = arr
-            example = tuple(example)
-        return example
+        self.img = img
+        self.downsample = downsample
     
     def transform_batch(self, batch):
         if 'features' in self.sources:
@@ -64,66 +113,81 @@ class To8Bit(Transformer):
             index = self.sources.index('features')
             new_arr = []
             for arr in batch[index]:
-                #print(arr[:, 0, 0])
                 img = Image.fromarray(arr.transpose(1, 2, 0))
-                img = img.resize((32, 32), Image.ANTIALIAS)
-                img = img.quantize(palette=self.img, colors=16)
+                if self.downsample:
+                    img = img.resize((DIM_X, DIM_Y), Image.ANTIALIAS)
+                img = img.quantize(palette=self.img, colors=N_COLORS)
                 arr = np.array(img)
-                arr[arr > 15] = 0 #HACK don't know why it's giving more colors sometimes
+                arr[arr > (N_COLORS - 1)] = 0 #HACK don't know why it's giving more colors sometimes
                 
-                arr_ = np.zeros((16, 32 * 32)).astype(arr.dtype)
-                arr_[arr.flatten(), np.arange(32 * 32)] = 1
-                new_arr.append(arr_.reshape((16, 32, 32)))
+                arr_ = np.zeros((N_COLORS, DIM_X * DIM_Y)).astype(arr.dtype)
+                arr_[arr.flatten(), np.arange(DIM_X * DIM_Y)] = 1
+                new_arr.append(arr_.reshape((N_COLORS, DIM_X, DIM_Y)))
             batch[index] = np.array(new_arr)
             batch = tuple(batch)
         return batch
 
-# ############################# Batch iterator ###############################
-# This is just a simple helper function iterating over training data in
-# mini-batches of a particular size, optionally in random order. It assumes
-# data is available as numpy arrays. For big datasets, you could load numpy
-# arrays as memory-mapped files (np.load(..., mmap_mode='r')), or write your
-# own custom data iteration function. For small datasets, you can also copy
-# them to GPU at once for slightly improved performance. This would involve
-# several changes in the main program, though, and is not demonstrated here.
+def load_stream(batch_size=64, source=None, img=None, downsample=True):
+    global DIM_X, DIM_Y
+    if downsample:
+        DIM_X = 32
+        DIM_Y = 32
+        
+    if source is None:
+        raise ValueError('No source provided')
+    
+    logging.info(
+        'Loading data from `{}` {}and quantizing to {} colors').format(
+        source, '(downsampling)' if downsampling else '', N_COLORS)
+    
+    f = h5py.File(source, 'r')
+    arr = f['features'][:1000]
+    arr = arr.transpose(0, 2, 3, 1)
+    arr = arr.reshape((arr.shape[0] * arr.shape[1], arr.shape[2], arr.shape[3]))
+    img = Image.fromarray(arr).convert(
+        'P', palette=Image.ADAPTIVE, colors=N_COLORS)
 
-#def load_stream(batch_size=128, path="/data/lisa/data/", img=None):
-def load_stream(batch_size=64, path="/home/devon/Data/basic/", img=None):
-    path = os.path.join(path, data_name)
     train_data = H5PYDataset(path, which_sets=('train',))
     test_data = H5PYDataset(path, which_sets=('test',))
     num_train = train_data.num_examples
     num_test = test_data.num_examples
-    print("Number of test examples: ", num_test)
-    print("Number of training examples: ", num_train)
+
     train_scheme = ShuffledScheme(examples=num_train, batch_size=batch_size)
     train_stream = To8Bit(img=img, data_stream=DataStream(
-        train_data, iteration_scheme=train_scheme))
+        train_data, iteration_scheme=train_scheme), downsample=downsample)
     test_scheme = ShuffledScheme(examples=num_test, batch_size=batch_size)
     test_stream = To8Bit(img=img, data_stream=DataStream(
-        test_data, iteration_scheme=test_scheme))
-    return train_stream, test_stream
+        test_data, iteration_scheme=test_scheme), downsample=downsample)
+    return train_stream, test_stream, num_train
 
-# ##################### Build the neural network model #######################
-# We create two models: The generator and the discriminator network. The
-# generator needs a transposed convolution layer defined first.
+def print_images(images, num_x, num_y, file='./'):
+    scipy.misc.imsave(file,  # current epoch No.
+                      (images.reshape(num_x, num_y, DIM_C, DIM_X, DIM_Y)
+                       .transpose(0, 3, 1, 4, 2)
+                       .reshape(num_x * DIM_X, num_y * DIM_Y, DIM_C)))
+
+# ##################### MODEL #######################
 
 class Deconv2DLayer(lasagne.layers.Layer):
-    def __init__(self, incoming, num_filters, filter_size, stride=1, pad=0, W=None, b=None,
+    def __init__(self, incoming, num_filters, filter_size, stride=1, pad=0,
+                 W=None, b=None,
                  nonlinearity=lasagne.nonlinearities.rectify, **kwargs):
+        
         super(Deconv2DLayer, self).__init__(incoming, **kwargs)
         self.num_filters = num_filters
         self.filter_size = lasagne.utils.as_tuple(filter_size, 2, int)
         self.stride = lasagne.utils.as_tuple(stride, 2, int)
         self.pad = lasagne.utils.as_tuple(pad, 2, int)
         if W is None:
-            self.W = self.add_param(lasagne.init.Orthogonal(),
-                                    (self.input_shape[1], num_filters) + self.filter_size,
-                                    name='W')
+            self.W = self.add_param(
+                lasagne.init.Orthogonal(),
+                (self.input_shape[1], num_filters) + self.filter_size,
+                name='W')
         else:
-            self.W = self.add_param(W,
-                                    (self.input_shape[1], num_filters) + self.filter_size,
-                                    name='W')
+            self.W = self.add_param(
+                W,
+                (self.input_shape[1], num_filters) + self.filter_size,
+                name='W')
         if b is None:
             self.b = self.add_param(lasagne.init.Constant(0),
                                     (num_filters,),
@@ -154,82 +218,33 @@ class Deconv2DLayer(lasagne.layers.Layer):
             conved += self.b.dimshuffle('x', 0, 'x', 'x')
         return self.nonlinearity(conved)
 
-def build_discriminator(input_var=None):
-
-    lrelu = LeakyRectify(0.2)
-    layer = InputLayer(shape=(None, 16, 32, 32), input_var=input_var)
-    # two convolutions
-    layer = Conv2DLayer(layer, 128, 5, stride=2, pad=2, nonlinearity=lrelu)
-    
-    '''
-    layer = batch_norm(Conv2DLayer(layer, 128 * 2, 5, stride=2, pad=2, nonlinearity=lrelu))
-    layer = batch_norm(Conv2DLayer(layer, 128 * 4, 5, stride=2, pad=2, nonlinearity=lrelu))
-    layer = batch_norm(Conv2DLayer(layer, 128 * 8, 5, stride=2, pad=2, nonlinearity=lrelu))
-    '''
-    
-    layer = Conv2DLayer(layer, 128 * 2, 5, stride=2, pad=2, nonlinearity=lrelu)
-    layer = Conv2DLayer(layer, 128 * 4, 5, stride=2, pad=2, nonlinearity=lrelu)
-    #layer = Conv2DLayer(layer, 128 * 8, 5, stride=2, pad=2, nonlinearity=lrelu)
+def build_discriminator(input_var=None, dim_h=128):
+    layer = InputLayer(shape=(None, N_COLORS, DIM_X, DIM_Y), input_var=input_var)
+    layer = Conv2DLayer(layer, dim_h, 5, stride=2, pad=2, nonlinearity=lrelu)
+    layer = Conv2DLayer(layer, dim_h * 2, 5, stride=2, pad=2, nonlinearity=lrelu)
+    layer = Conv2DLayer(layer, dim_h * 4, 5, stride=2, pad=2, nonlinearity=lrelu)
+    if DIM_X == 64:
+        layer = Conv2DLayer(layer, dim_h * 4, 5, stride=2, pad=2,
+                            nonlinearity=lrelu)
     
     layer = DenseLayer(layer, 1, nonlinearity=None)
-    print("Discriminator output:", layer.output_shape)
+
+    logger.debug('Discriminator output: {}'.format(layer.output_shape))
     return layer
 
-
-def initial_parameters():
-    parameter = {}
-    parameter['beta1'] = theano.shared(np.zeros(128 * 4 * 4 * 4).astype('float32'))
-    parameter['gamma1'] = theano.shared(np.ones(128 * 4 * 4 * 4).astype('float32'))
-    parameter['mean1'] = theano.shared(np.zeros(128 * 4 * 4 * 4).astype('float32'))
-    parameter['inv_std1'] = theano.shared(np.ones(128 * 4 * 4 * 4).astype('float32'))
-    parameter['beta2'] = theano.shared(np.zeros(128 * 2).astype('float32'))
-    parameter['gamma2'] = theano.shared(np.ones(128 * 2).astype('float32'))
-    parameter['mean2'] = theano.shared(np.zeros(128 * 2).astype('float32'))
-    parameter['inv_std2'] = theano.shared(np.ones(128 * 2).astype('float32'))
-    parameter['beta3'] = theano.shared(np.zeros(128).astype('float32'))
-    parameter['gamma3'] = theano.shared(np.ones(128).astype('float32'))
-    parameter['mean3'] = theano.shared(np.zeros(128).astype('float32'))
-    parameter['inv_std3'] = theano.shared(np.ones(128).astype('float32'))
-    return parameter
-
-
-def build_generator(parameter, input_var=None):
-    from lasagne.layers import InputLayer, ReshapeLayer, DenseLayer, batch_norm
-    from lasagne.nonlinearities import tanh, sigmoid
-
+def build_generator(input_var=None, dim_h=128):
     layer = InputLayer(shape=(None, 100), input_var=input_var)
+    layer = batch_norm(DenseLayer(layer, dim_h * 4 * 4 * 4))
+    layer = ReshapeLayer(layer, ([0], dim_h * 4, 4, 4))
+    layer = batch_norm(Deconv2DLayer(layer, dim_h * 2, 5, stride=2, pad=2))
+    layer = batch_norm(Deconv2DLayer(layer, dim_h, 5, stride=2, pad=2))
+    if DIM_X == 64:
+        layer = batch_norm(Deconv2DLayer(layer, dim_h, 5, stride=2, pad=2))
+    layer = Deconv2DLayer(layer, N_COLORS, 5, stride=2, pad=2,
+                          nonlinearity=None)
 
-    # fully-connected layer
-    layer = DenseLayer(layer, 128 * 4 * 4 * 4)
-    parameter['W1'] = layer.W
-    parameter['b1'] = layer.b
-    layer = batch_norm(layer, beta=parameter['beta1'], gamma=parameter['gamma1'],
-                       mean=parameter['mean1'], inv_std=parameter['inv_std1'])
-    layer = ReshapeLayer(layer, ([0], 128 * 4, 4, 4))
-    layer = Deconv2DLayer(layer, 128 * 2, 5, stride=2, pad=2)
-    parameter['W2'] = layer.W
-    parameter['b2'] = layer.b
-    layer = batch_norm(layer, beta=parameter['beta2'], gamma=parameter['gamma2'],
-                       mean=parameter['mean2'], inv_std=parameter['inv_std2'])
-
-    layer = Deconv2DLayer(layer, 128, 5, stride=2, pad=2)
-    parameter['W3'] = layer.W
-    parameter['b3'] = layer.b
-    layer = batch_norm(layer, beta=parameter['beta3'], gamma=parameter['gamma3'],
-                       mean=parameter['mean3'], inv_std=parameter['inv_std3'])
-    
-    layer = Deconv2DLayer(layer, 16, 5, stride=2, pad=2, nonlinearity=sigmoid)
-    parameter['W4'] = layer.W
-    parameter['b4'] = layer.b
-    # shape=(batch,1,28,28)
-    print("Generator output:", layer.output_shape)
+    logger.debug('Generator output: {}'.format(layer.output_shape))
     return layer
-
-def print_images(images, num_x, num_y, file='./'):
-    scipy.misc.imsave(file,  # current epoch No.
-                      (images.reshape(num_x, num_y, 3, 32, 32)
-                       .transpose(0, 3, 1, 4, 2)
-                       .reshape(num_x * 32, num_y * 32, 3)))
 
 def log_sum_exp(x, axis=None):
     '''Numerically stable log( sum( exp(A) ) ).
@@ -238,6 +253,15 @@ def log_sum_exp(x, axis=None):
     x_max = T.max(x, axis=axis, keepdims=True)
     y = T.log(T.sum(T.exp(x - x_max), axis=axis, keepdims=True)) + x_max
     y = T.sum(y, axis=axis)
+    return y
+
+def log_sum_exp2(x, axis=None):
+    '''Numerically stable log( sum( exp(A) ) ).
+
+    '''
+    x_max = T.max(x, axis=axis, keepdims=True)
+    y = T.log(T.sum(T.exp(x - x_max), axis=axis, keepdims=True)) + x_max
+    y = T.sum(y, axis=axis, keepdims=True)
     return y
 
 def norm_exp(log_factor):
@@ -286,16 +310,8 @@ def train(num_epochs,
           n_samples=20,
           image_dir=None,
           binary_dir=None,
-          gt_image_dir=None):
-
-    #f = h5py.File('/data/lisa/data/celeba_64.hdf5', 'r')
-    f = h5py.File('/home/devon/Data/basic/celeba_64.hdf5', 'r')
-    #arr = f['features'][0]
-    #f = h5py.File('/home/devon/Data/basic/celeba_64.hdf5', 'r')
-    arr = f['features'][:1000]
-    arr = arr.transpose(0, 2, 3, 1)
-    arr = arr.reshape((arr.shape[0] * arr.shape[1], arr.shape[2], arr.shape[3]))
-    img = Image.fromarray(arr).convert('P', palette=Image.ADAPTIVE, colors=16)
+          gt_image_dir=None,
+          source=None):
     
     # Load the dataset
     log_file = open(filename, 'w')
@@ -318,7 +334,6 @@ def train(num_epochs,
     parameter = initial_parameters()
     generator = build_generator(parameter, noise_var)
     discriminator = build_discriminator(input_var)
-
     trng = RandomStreams(random.randint(1, 1000000))
 
     # Sample
@@ -326,14 +341,19 @@ def train(num_epochs,
     dim_x = input_var.shape[2]
     dim_y = input_var.shape[3]
 
-    g_output = lasagne.layers.get_output(generator)
-    g_output = g_output / g_output.sum(axis=1, keepdims=True)
-    p_p = T.shape_padleft(g_output.transpose(0, 2, 3, 1))
+    g_output_logit = lasagne.layers.get_output(generator)
+    g_output_logit_ = g_output_logit.transpose(0, 2, 3, 1)
+    g_output_logit_ = g_output_logit_.reshape((-1, 16))
+    g_output = T.nnet.softmax(g_output_logit_)
+    g_output = g_output.reshape((-1, dim_x, dim_y, 16))
+    p_p = T.shape_padleft(g_output)
+    g_output = g_output.transpose(0, 3, 1, 2)
     p_t = T.zeros((n_samples, batch_size, dim_x, dim_y, 16)) + p_p
     p = p_t.reshape((-1, 16))
     samples = trng.multinomial(pvals=p).astype(floatX)
     samples = theano.gradient.disconnected_grad(samples)
-    samples = samples.reshape((n_samples, batch_size, 16, dim_x, dim_y))
+    samples = samples.reshape((n_samples, batch_size, dim_x, dim_y, 16))
+    samples = samples.transpose(0, 1, 4, 2, 3)
     #samples = (R <= T.shape_padleft(g_output)).astype(floatX)
     
     # Create expression for passing real data through the discriminator
@@ -345,9 +365,14 @@ def train(num_epochs,
     
     log_d1 = -T.nnet.softplus(-fake_out_)
     log_d0 = -(fake_out_ + T.nnet.softplus(-fake_out_))
-    log_w = log_d1 - log_d0
-    g_output_ = T.shape_padleft(T.clip(g_output, 1e-7, 1. - 1e-7))
-    log_g = (samples * T.log(g_output_) + (1. - samples) * T.log(1. - g_output_)).sum(axis=(2, 3, 4))
+    #log_w = log_d1 - log_d0
+    log_w = fake_out_
+    #g_output_ = T.shape_padleft(T.clip(g_output, 1e-7, 1. - 1e-7))
+    #log_g = (samples * T.log(g_output_) + (1. - samples) * T.log(1. - g_output_)).sum(axis=(2, 3, 4))
+    #log_g = (samples * T.log(g_output) + (1. - samples) * T.log(1. - g_output)).sum(axis=(2, 3, 4))
+    #log_g = (samples * -T.nnet.softplus(-g_output_logit) + (1. - samples) * -(g_output_logit + T.nnet.softplus(-g_output_logit))).sum(axis=(2, 3, 4))
+    #log_g = (-T.nnet.softplus(-g_output_logit) - (1. - samples) * g_output_logit).sum(axis=(2, 3, 4))
+    log_g = (samples * (g_output_logit - log_sum_exp2(g_output_logit, axis=1))[None, :, :, :, :]).sum(axis=(2, 3, 4))
     
     # Find normalized weights.
     log_N = T.log(log_w.shape[0]).astype(floatX)
@@ -369,8 +394,7 @@ def train(num_epochs,
     generator_params = lasagne.layers.get_all_params(generator, trainable=True)
     discriminator_params = lasagne.layers.get_all_params(discriminator, trainable=True)
 
-    # Losses / updates
-    
+    # Losses / updates    
     generator_updates = lasagne.updates.adam(
         generator_loss, generator_params, learning_rate=gen_lr, beta1=beta_1_gen)
     discriminator_updates = lasagne.updates.adam(
@@ -383,16 +407,28 @@ def train(num_epochs,
     discriminator_updates = lasagne.updates.rmsprop(
         discriminator_loss, discriminator_params, learning_rate=disc_lr)
     '''
+    disc_stats = {
+        'D loss': discriminator_loss,
+        'P(real)': (real_out > 0.).mean()
+    }
+    
+    gen_stats = {
+        'G loss': generator_loss,
+        'P(fake)': (fake_out < 0.).mean(),
+        'Z (est)': log_Z_est_.mean(),
+        'log D(fake=1)': log_d1.mean(),
+        'log D(fake=0)': log_d0.mean(),
+        'log g': log_g.mean(),
+        'norm w': w_tilde.mean(),
+        'ESS': (1. / (w_tilde ** 2).sum(0)).mean()
+    }
 
     train_discriminator = theano.function([noise_var, input_var],
-                               [(real_out > 0.).mean(), discriminator_loss],
-                                allow_input_downcast=True,
+                               disc_stats, allow_input_downcast=True,
                                updates=discriminator_updates)
 
     train_generator = theano.function([noise_var, input_var],
-                               [(fake_out < 0.).mean(),
-                                generator_loss, log_Z_est_.mean()],
-                                allow_input_downcast=True,
+                               gen_stats, allow_input_downcast=True,
                                updates=generator_updates)
 
     # Compile another function generating some data
@@ -419,51 +455,65 @@ def train(num_epochs,
         start_time = time.time()
         prefix = "ep_{}".format(epoch)
         
+        '''
+        widgets = ['Epoch {}, '.format(epoch), Timer(), Bar()]
+        pbar = ProgressBar(widgets=widgets, maxval=(50000 // 64)).start()
+        '''
+        
         for batch in train_stream.get_epoch_iterator():
             inputs = np.array(batch[0], dtype=np.float32)
             noise = lasagne.utils.floatX(np.random.rand(len(inputs), 100))
 
             #print(f_test(noise, inputs))
             
-            samples_print_gt = convert_to_rgb(inputs, img)
-            print_images(samples_print_gt[:64], 8, 8, file=gt_image_dir + prefix + '_gt.png')
+            #samples_print_gt = convert_to_rgb(inputs, img)
+            #print_images(samples_print_gt[:64], 8, 8, file=gt_image_dir + prefix + '_gt.png')
             
             train_discriminator(noise, inputs)
-            disc_train_out = train_discriminator(noise, inputs)
-            p_real, disc_loss = disc_train_out
-
-            gen_loss_array = []
-            p_fake_array = []
-            z_est_array = []
+            disc_outs = train_discriminator(noise, inputs) 
+            gen_outs = {}
 
             for i in range(num_iter_gen):
                 gen_train_out = train_generator(noise, inputs)
-                p_fake, gen_loss, z_est = gen_train_out
-                gen_loss_array.append(gen_loss)
-                p_fake_array.append(p_fake)
-                z_est_array.append(z_est)
-
-            gen_loss = np.mean(gen_loss_array)
-            p_fake = np.mean(p_fake_array)
-            z_est = np.mean(z_est_array)
+                gen_outs_ = gen_train_out
+                if gen_outs == {}:
+                    gen_outs = gen_outs_
+                else:
+                    for k in gen_outs.keys():
+                        gen_outs[k].append(gen_outs_[k])
+                
+            for k, v in gen_outs.items():
+                gen_outs[k] = np.mean(v)
 
             train_batches += 1
             if train_batches % print_freq == 0:
                 print('-' * 80)
                 print("Batch Number: {}, Epoch Number: {}".format(train_batches + 1, epoch + 1))
-                print("Generator: p_fake: {}, gen_loss: {}, z_est: {}".format(p_fake, gen_loss, z_est))
-                print("Discriminator: p_real: {}, disc_loss: {}".format(p_real, disc_loss))
+                found_nan = False
+                for k, v in disc_outs.items():
+                    print('{0}: {1}'.format(k, v))
+                    if np.isnan(v):
+                        found_nan = True
+                for k, v in gen_outs.items():
+                    print('{0}: {1}'.format(k, v))
+                    if np.isnan(v):
+                        found_nan = True
+                if found_nan:
+                    print('Found NAN')
+                    break
+                '''
                 log_file.write('-' * 80 + '\n')
                 log_file.write("Batch Number: {}".format(train_batches + 1, epoch + 1) + '\n')
                 log_file.write("Generator: p_fake: {}, gen_loss: {} \n".format(p_fake, disc_loss))
                 log_file.write("Discriminator: p_real: {}, disc_loss: {} \n".format(p_real, disc_loss))
                 log_file.write('-' * 80 + '\n')
+                '''
                 samples = gen_fn(lasagne.utils.floatX(np.random.rand(49, 100)))
                 samples_print = convert_to_rgb(samples, img)
                 print_images(samples_print, 7, 7, file=image_dir + prefix + "_{}".format(train_batches) +'_gen.png')
                 
-                samples_print_gt = convert_to_rgb(inputs, img)
-                print_images(samples_print_gt[:64], 8, 8, file=gt_image_dir + prefix + '_gt.png')
+                #samples_print_gt = convert_to_rgb(inputs, img)
+                #print_images(samples_print_gt[:64], 8, 8, file=gt_image_dir + prefix + '_gt.png')
 
         # Then we print the results for this epoch:
         print("Total Epoch {} of {} took {:.3f}s".format(
