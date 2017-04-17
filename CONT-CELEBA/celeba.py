@@ -5,44 +5,101 @@
 from __future__ import print_function
 
 import datetime
+import logging
+import os
+from os import path
 import sys
 import time
-import os
-import numpy as np
-import theano
-import theano.tensor as T
-import pylab as pl
-import lasagne
-import scipy.misc
+
 from fuel.datasets.hdf5 import H5PYDataset
 from fuel.schemes import ShuffledScheme, SequentialScheme
 from fuel.streams import DataStream
-
+import h5py
+import lasagne
 from lasagne.layers import (InputLayer, ReshapeLayer,
                                 DenseLayer, batch_norm, GaussianNoiseLayer)
 from lasagne.layers.dnn import Conv2DDNNLayer as Conv2DLayer
 from lasagne.nonlinearities import LeakyRectify, sigmoid
+import numpy as np
+from progressbar import Bar, ProgressBar, Percentage, Timer
+import pylab as pl
+import theano
+import theano.tensor as T
+import scipy.misc
+
+
 floatX = theano.config.floatX
-data_name = "celeba_64.hdf5"
 
+# ##################### UTIL #####################
 
-# ############################# Batch iterator ###############################
-# This is just a simple helper function iterating over training data in
-# mini-batches of a particular size, optionally in random order. It assumes
-# data is available as numpy arrays. For big datasets, you could load numpy
-# arrays as memory-mapped files (np.load(..., mmap_mode='r')), or write your
-# own custom data iteration function. For small datasets, you can also copy
-# them to GPU at once for slightly improved performance. This would involve
-# several changes in the main program, though, and is not demonstrated here.
+logging.basicConfig()
+logger = logging.getLogger(__name__)
+logger.propagate = False
+file_formatter = logging.Formatter(
+    '%(asctime)s:%(name)s[%(levelname)s]:%(message)s')
+stream_formatter = logging.Formatter(
+    '[%(levelname)s:%(name)s]:%(message)s' + ' ' * 40)
 
-def load_stream(batch_size=64, path="/data/lisa/data"):
-    path = os.path.join(path, data_name)
-    train_data = H5PYDataset(path, which_sets=('train',))
-    test_data = H5PYDataset(path, which_sets=('test',))
+def set_stream_logger(verbosity):
+    global logger
+
+    if verbosity == 0:
+        level = logging.WARNING
+        lstr = 'WARNING'
+    elif verbosity == 1:
+        level = logging.INFO
+        lstr = 'INFO'
+    elif verbosity == 2:
+        level = logging.DEBUG
+        lstr = 'DEBUG'
+    else:
+        level = logging.INFO
+        lstr = 'INFO'
+    logger.setLevel(level)
+    ch = logging.StreamHandler()
+    ch.terminator = ''
+    ch.setLevel(level)
+    ch.setFormatter(stream_formatter)
+    logger.addHandler(ch)
+    logger.info('Setting logging to %s' % lstr)
+
+def set_file_logger(file_path):
+    global logger
+    fh = logging.FileHandler(file_path)
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(file_formatter)
+    logger.addHandler(fh)
+    fh.terminator = ''
+    logger.info('Saving logs to %s' % file_path)
+    
+def update_dict_of_lists(d_to_update, **d):
+    '''Updates a dict of list with kwargs.
+
+    Args:
+        d_to_update (dict): dictionary of lists.
+        **d: keyword arguments to append.
+
+    '''
+    for k, v in d.iteritems():
+        if k in d_to_update.keys():
+            d_to_update[k].append(v)
+        else:
+            d_to_update[k] = [v]
+
+# ##################### DATA #####################
+
+def load_stream(batch_size=None, source=None):
+    logger.info('Loading data from `{}`'.format(source))
+    
+    train_data = H5PYDataset(source, which_sets=('train',))
+    test_data = H5PYDataset(source, which_sets=('test',))
+
     num_train = train_data.num_examples
     num_test = test_data.num_examples
-    print("Number of test examples: ", num_test)
-    print("Number of training examples: ", num_train)
+
+    logger.debug('Number of test examples: {}'.format(num_test))
+    logger.debug('Number of training examples: {}'.format(num_train))
+    
     train_scheme = ShuffledScheme(examples=num_train, batch_size=batch_size)
     train_stream = DataStream(train_data, iteration_scheme=train_scheme)
     test_scheme = ShuffledScheme(examples=num_test, batch_size=batch_size)
@@ -56,8 +113,6 @@ def inverse_transform(image):
     return (np.array(image) + 1.) * 127.5
 
 # ##################### Build the neural network model #######################
-# We create two models: The generator and the discriminator network. The
-# generator needs a transposed convolution layer defined first.
 
 class Deconv2DLayer(lasagne.layers.Layer):
     def __init__(self, incoming, num_filters, filter_size, stride=1, pad=0, W=None, b=None,
@@ -109,13 +164,12 @@ def build_discriminator(input_var=None):
 
     lrelu = LeakyRectify(0.2)
     layer = InputLayer(shape=(None, 3, 64, 64), input_var=input_var)
-    # two convolutions
     layer = Conv2DLayer(layer, 128, 5, stride=2, pad=2, nonlinearity=lrelu)
     layer = batch_norm(Conv2DLayer(layer, 128 * 2, 5, stride=2, pad=2, nonlinearity=lrelu))
     layer = batch_norm(Conv2DLayer(layer, 128 * 4, 5, stride=2, pad=2, nonlinearity=lrelu))
     layer = batch_norm(Conv2DLayer(layer, 128 * 8, 5, stride=2, pad=2, nonlinearity=lrelu))
     layer = DenseLayer(layer, 1, nonlinearity=None)
-    print("Discriminator output:", layer.output_shape)
+    logger.debug('Discriminator output: {}' .format(layer.output_shape))
     return layer
 
 
@@ -145,8 +199,6 @@ def build_generator(parameter, input_var=None):
     from lasagne.nonlinearities import tanh
 
     layer = InputLayer(shape=(None, 100), input_var=input_var)
-
-    # fully-connected layer
     layer = DenseLayer(layer, 128 * 8 * 4 * 4)
     parameter['W1'] = layer.W
     parameter['b1'] = layer.b
@@ -173,8 +225,8 @@ def build_generator(parameter, input_var=None):
     layer = Deconv2DLayer(layer, 3, 5, stride=2, pad=2, nonlinearity=tanh)
     parameter['W5'] = layer.W
     parameter['b5'] = layer.b
-    # shape=(batch,1,28,28)
-    print("Generator output:", layer.output_shape)
+    
+    logger.debug('Generator output: {}'.format(layer.output_shape))
     return layer
 
 def print_images(images, num_x, num_y, file='./'):
@@ -182,8 +234,6 @@ def print_images(images, num_x, num_y, file='./'):
                       (images.reshape(num_x, num_y, 3, 64, 64)
                        .transpose(0, 3, 1, 4, 2)
                        .reshape(num_x * 64, num_y * 64, 3)))
-
-
 
 def log_sum_exp(x, axis=None):
     '''Numerically stable log( sum( exp(A) ) ).
@@ -204,93 +254,107 @@ def norm_exp(log_factor):
     w_tilde  = T.exp(log_w)
     return w_tilde
 
-def reweighted_loss(fake_out):
-    log_d1 = -T.nnet.softplus(-fake_out)  # -D_cell.neg_log_prob(1., P=d)
-    log_d0 = -(fake_out+T.nnet.softplus(-fake_out))  # -D_cell.neg_log_prob(0., P=d)
+def BGAN(fake_out, real_out, log_Z):    
+    log_d1 = -T.nnet.softplus(-fake_out)
+    log_d0 = -fake_out - T.nnet.softplus(-fake_out)
+    log_w = log_d1 - log_d0
+
+    log_N = T.log(log_w.shape[0]).astype(log_w.dtype)
+    log_Z_est = log_sum_exp(log_w - log_N, axis=0)
+    log_Z_est = theano.gradient.disconnected_grad(log_Z_est)
+         
+    generator_loss = ((fake_out - log_Z) ** 2).mean()
+    #generator_loss = (fake_out ** 2).mean()
+    discriminator_loss = T.nnet.softplus(-real_out).mean() + (
+        (T.nnet.softplus(-fake_out) + fake_out)).mean()
+    return generator_loss, discriminator_loss, log_Z_est
+
+def GAN(fake_out, real_out):
+    log_d1 = -T.nnet.softplus(-fake_out)
+    log_d0 = -fake_out - T.nnet.softplus(-fake_out)
     log_w = log_d1 - log_d0
 
     # Find normalized weights.
-    log_N = T.log(log_w.shape[0]).astype(floatX)
+    log_N = T.log(log_w.shape[0]).astype(log_w.dtype)
     log_Z_est = log_sum_exp(log_w - log_N, axis=0)
-    log_w_tilde = log_w - T.shape_padleft(log_Z_est) - log_N
-
-    #cost = (log_w ** 2).mean()
-    #cost = ((log_w - T.maximum(log_Z_est, -2)) ** 2).mean()
-    cost = (log_Z_est ** 2).mean()
-    
-    return cost
-
+    log_Z_est = theano.gradient.disconnected_grad(log_Z_est)
+         
+    generator_loss = T.nnet.softplus(-fake_out).mean()
+    discriminator_loss = T.nnet.softplus(-real_out).mean() + (
+        (T.nnet.softplus(-fake_out) + fake_out)).mean()
+    return generator_loss, discriminator_loss, log_Z_est
 
 def train(num_epochs,
           filename,
-          gen_lr=1e-5,
+          batch_size=64,
+          gen_lr=1e-3,
           beta_1_gen=0.5,
           beta_1_disc=0.5,
           print_freq=200,
-          disc_lr=1e-5,
+          disc_lr=1e-3,
           num_iter_gen=1,
           image_dir=None,
           binary_dir=None):
+    
+    set_stream_logger(2)
+    set_file_logger(path.join(binary_dir, 'out.log'))
 
+    logger.info('Num_epochs: {}, disc_lr: {}, gen_lr: {}\n'.format(
+        num_epochs, disc_lr, gen_lr))
+    
     # Load the dataset
-    log_file = open(filename, 'w')
-    print("Loading data...")
-    print("Testing RW_DCGAN ...")
-    log_file.write("Testing RW_DCGAN...\n")
-    log_file.write("Loading data...\n")
-    log_file.write("Num_epochs: {}, disc_lr: {}, gen_lr: {}\n".format(num_epochs,
-                                                                      disc_lr,
-                                                                      gen_lr))
-    log_file.flush()
-    train_stream, test_stream = load_stream()
-    # Prepare Theano variables for inputs and targets
+    source = '/home/devon/Data/basic/celeba_64.hdf5'
+    f = h5py.File(source, 'r')
+    arr = f['features']
+    training_samples = arr.shape[0]
+    
+    train_stream, test_stream = load_stream(source=source,
+                                            batch_size=batch_size)
+    
+    # Input vars
     noise_var = T.matrix('noise')
     input_var = T.tensor4('inputs')
-    #target_var = T.ivector('targets')
+    log_Z = theano.shared(lasagne.utils.floatX(0.), name='log_Z')
 
     # Create neural network model
-    print("Building model and compiling GAN functions...")
-    log_file.write("Building model and compiling GAN functions...\n")
+    logger.info('Building model and compiling GAN functions...')
     parameter = initial_parameters()
     generator = build_generator(parameter, noise_var)
     discriminator = build_discriminator(input_var)
 
-    # Create expression for passing real data through the discriminator
     real_out = lasagne.layers.get_output(discriminator)
-    # Create expression for passing fake data through the discriminator
     fake_out = lasagne.layers.get_output(discriminator,
                                          lasagne.layers.get_output(generator))
 
+    generator_loss, discriminator_loss, log_Z_est = BGAN(fake_out, real_out, log_Z) 
 
-    generator_loss = 0.5 * reweighted_loss(fake_out)
-    #generator_loss = (T.nnet.softplus(-fake_out)).mean() -- Original GAN loss
-
-    # Create disc_loss
-    discriminator_loss = (T.nnet.softplus(-real_out)).mean() + (T.nnet.softplus(-fake_out)).mean() + fake_out.mean()
-
-    # Create update expressions for training
+    # Optimizer
     generator_params = lasagne.layers.get_all_params(generator, trainable=True)
     discriminator_params = lasagne.layers.get_all_params(discriminator, trainable=True)
 
-    # Generator loss
     generator_updates = lasagne.updates.adam(
         generator_loss, generator_params, learning_rate=gen_lr, beta1=beta_1_gen)
-
-    # Discriminator loss
+    generator_updates.update([(log_Z, 0.95 * log_Z + 0.05 * log_Z_est.mean())])
     discriminator_updates = lasagne.updates.adam(
         discriminator_loss, discriminator_params, learning_rate=disc_lr, beta1=beta_1_disc)
 
+    d_results = {
+        'p(real)': (real_out > 0.).mean(),
+        'L_D': discriminator_loss
+    }
+    
+    g_results = {
+        'p(fake)': (fake_out < 0.).mean(),
+        'L_G': generator_loss,
+        'log Z': log_Z,
+        'log Z (est)': log_Z_est.mean()
+    }
 
     train_discriminator = theano.function([noise_var, input_var],
-                               [(real_out > 0.).mean(), discriminator_loss],
-                                allow_input_downcast=True,
-                               updates=discriminator_updates)
+        d_results, allow_input_downcast=True, updates=discriminator_updates)
 
     train_generator = theano.function([noise_var],
-                               [(fake_out < 0.).mean(),
-                                generator_loss],
-                                allow_input_downcast=True,
-                               updates=generator_updates)
+        g_results, allow_input_downcast=True, updates=generator_updates)
 
     # Compile another function generating some data
     gen_fn = theano.function([noise_var],
@@ -298,17 +362,18 @@ def train(num_epochs,
                                                        deterministic=True))
 
     # Finally, launch the training loop.
-    print("Starting training of GAN...")
-    log_file.write("Starting training of GAN...\n")
-    log_file.flush()
+    logger.info('Starting training of GAN...')
     # We iterate over epochs:
     for epoch in range(num_epochs):
-        # In each epoch, we do a full pass over the training data:
-        print("Epoch: ", epoch)
-        train_err = 0
+        logger.info('Epoch: '.format(epoch))
         train_batches = 0
         start_time = time.time()
-        prefix = "ep_{}".format(epoch)
+        prefix = 'ep_{}'.format(epoch)
+        
+        results = {}
+        widgets = ['Epoch {}, '.format(epoch), Timer(), Bar()]
+        pbar = ProgressBar(
+            widgets=widgets, maxval=(training_samples // batch_size)).start()
         
         for batch in train_stream.get_epoch_iterator():
             inputs = transform(np.array(batch[0],dtype=np.float32))  # or batch
@@ -316,49 +381,32 @@ def train(num_epochs,
 
             train_discriminator(noise, inputs)
             disc_train_out = train_discriminator(noise, inputs)
-            p_real, disc_loss = disc_train_out
-
-            gen_loss_array = []
-            p_fake_array = []
+            d_outs = disc_train_out
+            update_dict_of_lists(results, **d_outs)
 
             for i in range(num_iter_gen):
-                gen_train_out = train_generator(noise)
-                p_fake, gen_loss = gen_train_out
-                gen_loss_array.append(gen_loss)
-                p_fake_array.append(p_fake)
-
-            gen_loss = np.mean(gen_loss_array)
-            p_fake = np.mean(p_fake_array)
+                g_outs = train_generator(noise)
+                g_outs = dict((k, np.asarray(v)) for k, v in g_outs.items())
+                update_dict_of_lists(results, **g_outs)
 
             train_batches += 1
+            pbar.update(train_batches)
+            
             if train_batches % print_freq == 0:
-                print('-' * 80)
-                print("Batch Number: {}, Epoch Number: {}".format(train_batches + 1, epoch + 1))
-                print("Generator: p_fake: {}, gen_loss: {}".format(p_fake, gen_loss))
-                print("Discriminator: p_real: {}, disc_loss: {}".format(p_real, disc_loss))
-                log_file.write('-' * 80 + '\n')
-                log_file.write("Batch Number: {}".format(train_batches + 1, epoch + 1) + '\n')
-                log_file.write("Generator: p_fake: {}, gen_loss: {} \n".format(p_fake, disc_loss))
-                log_file.write("Discriminator: p_real: {}, disc_loss: {} \n".format(p_real, disc_loss))
-                log_file.write('-' * 80 + '\n')
+                result_summary = dict((k, np.mean(v)) for k, v in results.items())
+                logger.info(result_summary)
+                
                 samples = gen_fn(lasagne.utils.floatX(np.random.rand(5000, 100)))
                 samples_print = samples[0:49]
                 print_images(inverse_transform(samples_print), 7, 7, file=image_dir + prefix + '_gen_tmp.png')
 
         # Then we print the results for this epoch:
-        print("Total Epoch {} of {} took {:.3f}s".format(
+        logger.info('Total Epoch {} of {} took {:.3f}s'.format(
             epoch + 1, num_epochs, time.time() - start_time))
-        log_file.write("Total Epoch {} of {} took {:.3f}s\n".format(
-            epoch + 1, num_epochs, time.time() - start_time))
-
-        log_file.write("  training loss:\t{}\n".format(train_err / train_batches))
-        log_file.flush()
-
-        # And finally, we plot some generated data
+        
         samples = gen_fn(lasagne.utils.floatX(np.random.rand(5000, 100)))
         samples_print = samples[0:49]
         print_images(inverse_transform(samples_print), 7, 7, file=image_dir + prefix + '_gen.png')
-        #if epoch == num_epochs - 1: #save binary data for further calculation
         np.savez(binary_dir + prefix + '_celeba_gen_params.npz', *lasagne.layers.get_all_param_values(generator))
 
 

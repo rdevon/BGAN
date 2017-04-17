@@ -1,10 +1,10 @@
 import itertools
-import celeba#_mn as celeba
+import celeba_mn as celeba
 import os
 import time
 
-genlrlist = [5e-2]
-disclrlist = [5e-2]
+genlrlist = [1e-3]
+disclrlist = [1e-3]
 
 epochs = 200
 def main():
@@ -21,7 +21,7 @@ def main():
 
         save_dir = 'celeba_4b'
         #save_dir = os.path.join('./save/', save_dir)
-        save_dir = os.path.join('/data/lisatmp2/hjelmdev/outs/', save_dir)
+        save_dir = os.path.join('/home/devon/Outs/', save_dir)
         binary_dir = save_dir + '/binaries/'
         image_dir = save_dir + '/images/'
         gt_image_dir = save_dir + '/gt_images/'
