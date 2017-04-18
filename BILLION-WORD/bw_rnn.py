@@ -22,7 +22,7 @@ from lasagne.layers import (
     batch_norm, Conv1DLayer, DenseLayer, ElemwiseSumLayer,
     GaussianNoiseLayer, InputLayer, LSTMLayer, NonlinearityLayer, ReshapeLayer)
 from lasagne.nonlinearities import (
-    LeakyRectify, rectify, sigmoid, softmax)
+    LeakyRectify, rectify, sigmoid, softmax, tanh)
 import numpy as np
 from PIL import Image
 from progressbar import Bar, ProgressBar, Percentage, Timer
@@ -155,7 +155,7 @@ def load_stream(batch_size=64, source=None):
             
 # ##################### MODEL #####################
 
-def build_generator(input_var=None, dim_h=128, n_steps=3):
+def build_generator(input_var=None, dim_h=128, n_steps=1):
     layer = InputLayer(shape=(None, None, 10), input_var=input_var)
 
     for i in range(n_steps):
@@ -170,11 +170,12 @@ def build_generator(input_var=None, dim_h=128, n_steps=3):
         layer, dim_h, grad_clipping=GRAD_CLIP, nonlinearity=tanh)
     layer = ReshapeLayer(layer, (-1, dim_h))
     layer = DenseLayer(layer, N_WORDS, nonlinearity=None)
+    layer = ReshapeLayer(layer, (-1, L_GEN, N_WORDS))
     
     logger.debug('Generator output: {}'.format(layer.output_shape))
     return layer
 
-def build_discriminator(input_var=None, dim_h=256, n_steps=3):
+def build_discriminator(input_var=None, dim_h=128, n_steps=1):
     layer = InputLayer(shape=(None, None, N_WORDS), input_var=input_var)
     for i in range(n_steps):
         layer = LSTMLayer(
@@ -182,7 +183,7 @@ def build_discriminator(input_var=None, dim_h=256, n_steps=3):
             nonlinearity=tanh)
         layer = LSTMLayer(
             layer, dim_h, grad_clipping=GRAD_CLIP,
-            nonlinearity=tanh, backwards=True)
+            nonlinearity=tanh)
     layer = ReshapeLayer(layer, (-1, dim_h))
     layer = DenseLayer(layer, 1, nonlinearity=None)
     layer = ReshapeLayer(layer, (-1, L_GEN))
@@ -225,7 +226,7 @@ def norm_exp(log_factor):
 def BGAN(discriminator, g_output_logit, n_samples, trng, batch_size=64):
     d = OrderedDict()
     d['g_output_logit'] = g_output_logit
-    g_output_logit_ = g_output_logit_.reshape((-1, N_WORDS))
+    g_output_logit_ = g_output_logit.reshape((-1, N_WORDS))
     d['g_output_logit_'] = g_output_logit_
     
     g_output = T.nnet.softmax(g_output_logit_)
@@ -260,7 +261,7 @@ def BGAN(discriminator, g_output_logit, n_samples, trng, batch_size=64):
     d['log_Z_est'] = log_Z_est
 
     log_g = (samples * (g_output_logit - log_sum_exp2(
-        g_output_logit, axis=2))[None, :, :, :]).sum(axis=(2, 3))
+        g_output_logit, axis=2))[None, :, :, :]).sum(axis=3)
     d['log_g'] = log_g
     
     log_N = T.log(log_w.shape[0]).astype(floatX)
@@ -273,6 +274,8 @@ def BGAN(discriminator, g_output_logit, n_samples, trng, batch_size=64):
     generator_loss = -(w_tilde_ * log_g).sum(0).mean()
     discriminator_loss = (T.nnet.softplus(-D_r)).mean() + (
         T.nnet.softplus(-D_f)).mean() + D_f.mean()
+    d.update(generator_loss=generator_loss,
+             discriminator_loss=discriminator_loss)
     
     return generator_loss, discriminator_loss, D_r, D_f, log_Z_est, d
 
@@ -282,7 +285,7 @@ def summarize(results, samples, gt_samples, r_vocab, out_dir=None):
     results = dict((k, np.mean(v)) for k, v in results.items())    
     logger.info(results)
     
-    gt_samples = np.argmax(gt_samples, axis=1)
+    gt_samples = np.argmax(gt_samples, axis=2)
     strs = []
     for gt_sample in gt_samples:
         s = ''.join([r_vocab[c] for c in gt_sample])
@@ -290,7 +293,7 @@ def summarize(results, samples, gt_samples, r_vocab, out_dir=None):
     logger.info('GT:')
     logger.info(strs)
     
-    samples = np.argmax(samples, axis=1)
+    samples = np.argmax(samples, axis=2)
     strs = []
     for sample in samples:
         s = ''.join([r_vocab[c] for c in sample])
@@ -302,7 +305,7 @@ def main(source=None, vocab=None, num_epochs=None, learning_rate=None, beta=None
          dim_noise=None, batch_size=None, n_samples=None,
          n_steps=None,
          print_freq=None, image_dir=None, binary_dir=None, gt_image_dir=None,
-         summary_updates=1000, debug=False):
+         summary_updates=100, debug=False):
     
     # Load the dataset
     stream, train_samples = load_stream(source=source, batch_size=batch_size)
@@ -326,7 +329,7 @@ def main(source=None, vocab=None, num_epochs=None, learning_rate=None, beta=None
     if debug:
         batch = stream.get_epoch_iterator().next()[0]
         noise_ = lasagne.utils.floatX(np.random.rand(batch.shape[0],
-                                                     dim_noise))
+                                                     L_GEN, dim_noise))
         print batch.shape
         for k, v in d.items():
             print 'Testing {}'.format(k)
@@ -373,8 +376,7 @@ def main(source=None, vocab=None, num_epochs=None, learning_rate=None, beta=None
         
         for batch in stream.get_epoch_iterator():
             noise = lasagne.utils.floatX(np.random.rand(
-                batch[0].shape[0], dim_noise * L_GEN).reshape(
-                (batch[0].shape[0], L_GEN, dim_noise)))
+                batch[0].shape[0], L_GEN, dim_noise))
             disc_train_fn(batch[0].astype(floatX), noise)
             outs = gen_train_fn(batch[0].astype(floatX), noise)
             update_dict_of_lists(results, **outs)
@@ -383,9 +385,10 @@ def main(source=None, vocab=None, num_epochs=None, learning_rate=None, beta=None
             if u % summary_updates == 0:
                 try:
                     samples = gen_fn(lasagne.utils.floatX(
-                        np.random.rand(10, dim_noise)))
+                        np.random.rand(10, L_GEN, dim_noise)))
                     summarize(results, samples, batch[0][:10], r_vocab)
-                except:
+                except Exception as e:
+                    print(e)
                     pass
         logger.info('Epoch {} of {} took {:.3f}s'.format(
             epoch + 1, num_epochs, time.time() - start_time))
