@@ -110,23 +110,23 @@ class To8Bit(Transformer):
         self.img = img
     
     def transform_batch(self, batch):
-        if 'features' in self.sources:
-            batch = list(batch)
-            index = self.sources.index('features')
-            new_arr = []
-            for arr in batch[index]:
-                img = Image.fromarray(arr.transpose(1, 2, 0))
-                if img.size[0] != DIM_X:
-                    img = img.resize((DIM_X, DIM_Y), Image.ANTIALIAS)
-                img = img.quantize(palette=self.img, colors=N_COLORS)
-                arr = np.array(img)
-                arr[arr > (N_COLORS - 1)] = 0 #HACK don't know why it's giving more colors sometimes
-                
-                arr_ = np.zeros((N_COLORS, DIM_X * DIM_Y)).astype(arr.dtype)
-                arr_[arr.flatten(), np.arange(DIM_X * DIM_Y)] = 1
-                new_arr.append(arr_.reshape((N_COLORS, DIM_X, DIM_Y)))
-            batch[index] = np.array(new_arr)
-            batch = tuple(batch)
+        #if 'features' in self.sources:
+        batch = list(batch)
+        #index = self.sources.index('features')
+        new_arr = []
+        for arr in batch[index]:
+            img = Image.fromarray(arr.transpose(1, 2, 0))
+            if img.size[0] != DIM_X:
+                img = img.resize((DIM_X, DIM_Y), Image.ANTIALIAS)
+            img = img.quantize(palette=self.img, colors=N_COLORS)
+            arr = np.array(img)
+            arr[arr > (N_COLORS - 1)] = 0 #HACK don't know why it's giving more colors sometimes
+            
+            arr_ = np.zeros((N_COLORS, DIM_X * DIM_Y)).astype(arr.dtype)
+            arr_[arr.flatten(), np.arange(DIM_X * DIM_Y)] = 1
+            new_arr.append(arr_.reshape((N_COLORS, DIM_X, DIM_Y)))
+        batch[0] = np.array(new_arr)
+        batch = tuple(batch)
         return batch
 
 def load_stream(batch_size=64, source=None, img=None):
