@@ -76,15 +76,17 @@ class FileData:
 
             imgObj.close()
 
-        anime_npy = np.vstack(imageLst).astype('float32')
+        anime_npy = np.vstack(imageLst).astype('uint8')
 
         anime_npy = anime_npy.transpose(0, 3, 1, 2)
 
         f = h5py.File('anime_faces.hdf5', mode='w')
 
-        anime_faces = f.create_dataset('anime_faces', (0, index), dtype = 'float32')
-        split_dict = {'train': {'anime_faces': (0, index)},
-        'test': {'anime_faces': anime_npy.shape}}
+        anime_faces = f.create_dataset('anime_faces', (0, index), dtype = 'uint8')
+
+        split_dict = {'train': {'features': (0, index)},
+                      'test': {'features': (0, index)}}
+
         f.attrs['split'] = H5PYDataset.create_split_array(split_dict)
         anime_faces[...] = anime_npy
 
