@@ -138,7 +138,7 @@ def load_stream(batch_size=64, source=None, img=None):
         source, DIM_X, DIM_Y, N_COLORS))
     
     f = h5py.File(source, 'r')
-    arr = f['anime_faces'][:1000]
+    arr = f['features'][:1000]
     arr = arr.transpose(0, 2, 3, 1)
     arr = arr.reshape((arr.shape[0] * arr.shape[1], arr.shape[2], arr.shape[3]))
     img = Image.fromarray(arr).convert(
