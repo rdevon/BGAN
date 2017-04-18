@@ -39,8 +39,8 @@ data_name = "celeba_64.hdf5"
 lrelu = LeakyRectify(0.2)
 
 N_COLORS = 16
-DIM_X = 64
-DIM_Y = 64
+DIM_X = 32
+DIM_Y = 32
 DIM_C = 3
 
 # ##################### UTIL #####################
@@ -114,7 +114,7 @@ class To8Bit(Transformer):
         batch = list(batch)
         #index = self.sources.index('features')
         new_arr = []
-        for arr in batch[index]:
+        for arr in batch[0]:
             img = Image.fromarray(arr.transpose(1, 2, 0))
             if img.size[0] != DIM_X:
                 img = img.resize((DIM_X, DIM_Y), Image.ANTIALIAS)
@@ -227,7 +227,7 @@ def build_discriminator(input_var=None, dim_h=128):
     layer = Conv2DLayer(layer, dim_h * 2, 5, stride=2, pad=2, nonlinearity=lrelu)
     layer = Conv2DLayer(layer, dim_h * 4, 5, stride=2, pad=2, nonlinearity=lrelu)
     if DIM_X == 64:
-        layer = Conv2DLayer(layer, dim_h * 4, 5, stride=2, pad=2,
+        layer = Conv2DLayer(layer, dim_h * 8, 5, stride=2, pad=2,
                             nonlinearity=lrelu)
     
     layer = DenseLayer(layer, 1, nonlinearity=None)
@@ -236,11 +236,15 @@ def build_discriminator(input_var=None, dim_h=128):
     return layer
 
 def build_generator(input_var=None, dim_h=128):
+    if DIM_X == 64:
+        mult = 2
+    else:
+        mult = 1
     layer = InputLayer(shape=(None, 100), input_var=input_var)
-    layer = batch_norm(DenseLayer(layer, dim_h * 4 * 4 * 4))
-    layer = ReshapeLayer(layer, ([0], dim_h * 4, 4, 4))
-    layer = batch_norm(Deconv2DLayer(layer, dim_h * 2, 5, stride=2, pad=2))
-    layer = batch_norm(Deconv2DLayer(layer, dim_h, 5, stride=2, pad=2))
+    layer = batch_norm(DenseLayer(layer, mult * dim_h * 4 * 4 * 4))
+    layer = ReshapeLayer(layer, ([0], mult * dim_h * 4, 4, 4))
+    layer = batch_norm(Deconv2DLayer(layer, mult * dim_h * 2, 5, stride=2, pad=2))
+    layer = batch_norm(Deconv2DLayer(layer, mult * dim_h, 5, stride=2, pad=2))
     if DIM_X == 64:
         layer = batch_norm(Deconv2DLayer(layer, dim_h, 5, stride=2, pad=2))
     layer = Deconv2DLayer(layer, N_COLORS, 5, stride=2, pad=2,
@@ -429,25 +433,26 @@ def main(source=None, num_epochs=None,
         prefix = str(epoch)
         
         for batch in stream.get_epoch_iterator():
-            noise = lasagne.utils.floatX(np.random.rand(batch[0].shape[0],
-                                                        dim_noise))
-            disc_train_fn(batch[0].astype(floatX), noise)
-            outs = gen_train_fn(batch[0].astype(floatX), noise)
-            update_dict_of_lists(results, **outs)
+            if batch[0].shape[0] == 64:
+                noise = lasagne.utils.floatX(np.random.rand(batch[0].shape[0],
+                                                            dim_noise))
+                disc_train_fn(batch[0].astype(floatX), noise)
+                outs = gen_train_fn(batch[0].astype(floatX), noise)
+                update_dict_of_lists(results, **outs)
+                
+                if u % summary_updates == 0:
+                    try:
+                        samples = gen_fn(lasagne.utils.floatX(
+                            np.random.rand(64, dim_noise)))
+                        summarize(results, samples, batch[0][:64], train_batches=u,
+                                  image_dir=image_dir, gt_image_dir=gt_image_dir,
+                                  img=img, prefix=prefix)
+                    except Exception as e:
+                        print(e)
+                        pass
             
-            if u % summary_updates == 0:
-                try:
-                    samples = gen_fn(lasagne.utils.floatX(
-                        np.random.rand(64, dim_noise)))
-                    summarize(results, samples, batch[0][:64], train_batches=u,
-                              image_dir=image_dir, gt_image_dir=gt_image_dir,
-                              img=img, prefix=prefix)
-                except Exception as e:
-                    print(e)
-                    pass
-            
-            u += 1
-            pbar.update(u)
+                u += 1
+                pbar.update(u)
                 
         logger.info('Epoch {} of {} took {:.3f}s'.format(
             epoch + 1, num_epochs, time.time() - start_time))
