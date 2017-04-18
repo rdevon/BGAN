@@ -269,7 +269,7 @@ def BGAN(discriminator, g_output_logit, n_samples, trng, batch_size=64):
     
     generator_loss = -(w_tilde_ * log_g).sum(0).mean()
     discriminator_loss = (T.nnet.softplus(-D_r)).mean() + (
-        T.nnet.softplus(-D_f)).mean()
+        T.nnet.softplus(-D_f)).mean() + D_f.mean()
     
     return generator_loss, discriminator_loss, D_r, D_f, log_Z_est, d
 
@@ -295,9 +295,9 @@ def summarize(results, samples, gt_samples, r_vocab, out_dir=None):
     logger.info('Samples:')
     logger.info(strs)
 
-def main(source=None, vocab=None, num_epochs=None, gen_lr=None, beta_1_gen=None,
-         dim_noise=None, initial_eta=None, batch_size=None, n_samples=None,
-         beta_1_disc=None, disc_lr=None, num_iter_gen=None, n_steps=None,
+def main(source=None, vocab=None, num_epochs=None, learning_rate=None, beta=None,
+         dim_noise=None, batch_size=None, n_samples=None,
+         n_steps=None,
          print_freq=None, image_dir=None, binary_dir=None, gt_image_dir=None,
          summary_updates=1000, debug=False):
     
@@ -336,14 +336,13 @@ def main(source=None, vocab=None, num_epochs=None, gen_lr=None, beta_1_gen=None,
     generator_params = lasagne.layers.get_all_params(
         generator, trainable=True)
     
-    eta = theano.shared(lasagne.utils.floatX(initial_eta))
     
-    l_kwargs = dict(learning_rate=eta, beta1=0.5)
+    l_kwargs = dict(learning_rate=learning_rate, beta1=beta)
     
-    updates = lasagne.updates.adam(
+    d_updates = lasagne.updates.adam(
         discriminator_loss, discriminator_params, **l_kwargs)
-    updates.update(lasagne.updates.adam(
-        generator_loss, generator_params, **l_kwargs))
+    g_updates = lasagne.updates.adam(
+        generator_loss, generator_params, **l_kwargs)
     
     outputs = {
         'G cost': generator_loss,
@@ -351,7 +350,8 @@ def main(source=None, vocab=None, num_epochs=None, gen_lr=None, beta_1_gen=None,
         'p(real)': T.nnet.sigmoid(D_r > .5).mean(),
         'p(fake)': T.nnet.sigmoid(D_f > .5).mean(),
     }
-    train_fn = theano.function([input_var, noise], outputs, updates=updates)
+    gen_train_fn = theano.function([input_var, noise], outputs, updates=g_updates)
+    disc_train_fn = theano.function([input_var, noise], [], updates=d_updates)
     gen_fn = theano.function([noise], lasagne.layers.get_output(
         generator, deterministic=True))
 
@@ -372,7 +372,8 @@ def main(source=None, vocab=None, num_epochs=None, gen_lr=None, beta_1_gen=None,
         for batch in stream.get_epoch_iterator():
             noise = lasagne.utils.floatX(np.random.rand(batch[0].shape[0],
                                                         dim_noise))
-            outs = train_fn(batch[0].astype(floatX), noise)
+            disc_train_fn(batch[0].astype(floatX), noise)
+            outs = gen_train_fn(batch[0].astype(floatX), noise)
             update_dict_of_lists(results, **outs)
             u += 1
             pbar.update(u)
@@ -392,16 +393,13 @@ def main(source=None, vocab=None, num_epochs=None, gen_lr=None, beta_1_gen=None,
         '''
 
 _defaults = dict(
-    gen_lr=1e-4,
-    beta_1_gen=0.5,
-    beta_1_disc=0.5,
-    disc_lr=1e-4,
+    learning_rate=1e-3,
+    beta=0.5,
     num_epochs=100,
     num_iter_gen=1,
     dim_noise=100,
     batch_size=64,
     n_samples=20,
-    initial_eta=1e-4,
     print_freq=50
 )
     
