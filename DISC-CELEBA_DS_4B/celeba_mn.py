@@ -145,16 +145,11 @@ def load_stream(batch_size=64, source=None, img=None):
         'P', palette=Image.ADAPTIVE, colors=N_COLORS)
 
     train_data = H5PYDataset(source, which_sets=('train',))
-    test_data = H5PYDataset(source, which_sets=('test',))
     num_train = train_data.num_examples
-    num_test = test_data.num_examples
 
     train_scheme = ShuffledScheme(examples=num_train, batch_size=batch_size)
     train_stream = To8Bit(img=img, data_stream=DataStream(
         train_data, iteration_scheme=train_scheme))
-    test_scheme = ShuffledScheme(examples=num_test, batch_size=batch_size)
-    test_stream = To8Bit(img=img, data_stream=DataStream(
-        test_data, iteration_scheme=test_scheme))
     return train_stream, num_train, img
 
 def print_images(images, num_x, num_y, file='./'):
@@ -254,6 +249,7 @@ def build_generator(input_var=None, dim_h=128):
     logger.debug('Generator output: {}'.format(layer.output_shape))
     return layer
 
+
 # ##################### MATH #######################
 
 def log_sum_exp(x, axis=None):
@@ -288,6 +284,7 @@ def norm_exp(log_factor):
 
 def BGAN(discriminator, g_output_logit, n_samples, trng, batch_size=64):
     d = OrderedDict()
+    
     d['g_output_logit'] = g_output_logit
     g_output_logit_ = g_output_logit.transpose(0, 2, 3, 1)
     g_output_logit_ = g_output_logit_.reshape((-1, N_COLORS))
@@ -320,11 +317,6 @@ def BGAN(discriminator, g_output_logit, n_samples, trng, batch_size=64):
     log_w = D_f_
     d.update(log_d1=log_d1, log_d0=log_d0, log_w=log_w)
 
-    log_N = T.log(log_w.shape[0]).astype(log_w.dtype)
-    log_Z_est = log_sum_exp(log_w - log_N, axis=0)
-    log_Z_est = theano.gradient.disconnected_grad(log_Z_est)
-    d['log_Z_est'] = log_Z_est
-
     log_g = (samples * (g_output_logit - log_sum_exp2(
         g_output_logit, axis=1))[None, :, :, :, :]).sum(axis=(2, 3, 4))
     d['log_g'] = log_g
@@ -338,11 +330,12 @@ def BGAN(discriminator, g_output_logit, n_samples, trng, batch_size=64):
     
     generator_loss = -(w_tilde_ * log_g).sum(0).mean()
     discriminator_loss = (T.nnet.softplus(-D_r)).mean() + (
-        T.nnet.softplus(-D_f)).mean()
-    
+        T.nnet.softplus(-D_f)).mean() + D_f.mean()
+
     return generator_loss, discriminator_loss, D_r, D_f, log_Z_est, w_tilde, d
 
-# ##################### LOSS #####################
+
+# ##################### MAIN #####################
 
 def summarize(results, samples, gt_samples, train_batches=None,
               image_dir=None, gt_image_dir=None, prefix='', img=None):
@@ -375,11 +368,11 @@ def main(source=None, num_epochs=None,
     # MODELS
     generator = build_generator(noise)
     discriminator = build_discriminator(input_var)
+    
     trng = RandomStreams(random.randint(1, 1000000))
 
     # GRAPH / LOSS    
     g_output_logit = lasagne.layers.get_output(generator)
-    
     generator_loss, discriminator_loss, D_r, D_f, log_Z_est, w_tilde, d = BGAN(
         discriminator, g_output_logit, n_samples, trng)
 
@@ -401,10 +394,10 @@ def main(source=None, num_epochs=None,
     
     l_kwargs = dict(learning_rate=learning_rate, beta1=beta)
     
-    updates = lasagne.updates.adam(
+    d_updates = lasagne.updates.adam(
         discriminator_loss, discriminator_params, **l_kwargs)
-    updates.update(lasagne.updates.adam(
-        generator_loss, generator_params, **l_kwargs))
+    g_updates = lasagne.updates.adam(
+        generator_loss, generator_params, **l_kwargs)
     
     outputs = {
         'G cost': generator_loss,
@@ -415,7 +408,8 @@ def main(source=None, num_epochs=None,
         'norm w': w_tilde.mean(),
         'ESS': (1. / (w_tilde ** 2).sum(0)).mean()
     }
-    train_fn = theano.function([input_var, noise], outputs, updates=updates)
+    gen_train_fn = theano.function([input_var, noise], outputs, updates=g_updates)
+    disc_train_fn = theano.function([input_var, noise], [], updates=d_updates)
     gen_fn = theano.function([noise], lasagne.layers.get_output(
         generator, deterministic=True))
 
@@ -437,7 +431,8 @@ def main(source=None, num_epochs=None,
         for batch in stream.get_epoch_iterator():
             noise = lasagne.utils.floatX(np.random.rand(batch[0].shape[0],
                                                         dim_noise))
-            outs = train_fn(batch[0].astype(floatX), noise)
+            disc_train_fn(batch[0].astype(floatX), noise)
+            outs = gen_train_fn(batch[0].astype(floatX), noise)
             update_dict_of_lists(results, **outs)
             
             if u % summary_updates == 0:
