@@ -154,14 +154,14 @@ def load_stream(batch_size=64, source=None):
             
 # ##################### MODEL #####################
 
-def build_generator(input_var=None, dim_h=512):
+def build_generator(input_var=None, dim_h=256, n_steps=3):
     layer = InputLayer(shape=(None, 100), input_var=input_var)
 
     # fully-connected layer
     #batch_norm = lambda x: x
     layer = batch_norm(DenseLayer(layer, dim_h * L_GEN, nonlinearity=None))
     layer = ReshapeLayer(layer, ([0], dim_h, L_GEN))
-    for i in range(5):
+    for i in range(n_steps):
         layer_ = NonlinearityLayer(layer, rectify)
         layer_ = batch_norm(Conv1DLayer(layer_, dim_h, 5, stride=1, pad=2))
         layer_ = batch_norm(Conv1DLayer(layer_, dim_h, 5, stride=1, pad=2, nonlinearity=None))
@@ -171,13 +171,13 @@ def build_generator(input_var=None, dim_h=512):
     logger.debug('Generator output: {}'.format(layer.output_shape))
     return layer
 
-def build_discriminator(input_var=None, dim_h=512):
+def build_discriminator(input_var=None, dim_h=256, n_steps=3):
     layer = InputLayer(shape=(None, N_WORDS, L_GEN), input_var=input_var)
     layer = Conv1DLayer(layer, dim_h, 5, stride=1, pad=2, nonlinearity=None)
-    for i in range(5):
+    for i in range(n_steps):
         layer_ = NonlinearityLayer(layer, lrelu)
-        layer_ = batch_norm(Conv1DLayer(layer_, dim_h, 5, stride=1, pad=2))
-        layer_ = batch_norm(Conv1DLayer(layer_, dim_h, 5, stride=1, pad=2, nonlinearity=None))
+        layer_ = Conv1DLayer(layer_, dim_h, 5, stride=1, pad=2)
+        layer_ = Conv1DLayer(layer_, dim_h, 5, stride=1, pad=2, nonlinearity=None)
         layer = ElemwiseSumLayer([layer, layer_])
     layer = NonlinearityLayer(layer, lrelu)
     layer = DenseLayer(layer, 1, nonlinearity=None)
@@ -396,7 +396,6 @@ _defaults = dict(
     learning_rate=1e-3,
     beta=0.5,
     num_epochs=100,
-    num_iter_gen=1,
     dim_noise=100,
     batch_size=64,
     n_samples=20,
