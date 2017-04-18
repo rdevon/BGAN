@@ -19,10 +19,10 @@ from fuel.transformers import SourcewiseTransformer
 import h5py
 import lasagne
 from lasagne.layers import (
-    batch_norm, Conv1DLayer, DenseLayer, ElemwiseSumLayer,
-    GaussianNoiseLayer, InputLayer, NonlinearityLayer, ReshapeLayer)
+    batch_norm, Conv1DLayer, DenseLayer, ElemwiseSumLayer, Gate,
+    GaussianNoiseLayer, InputLayer, LSTMLayer, NonlinearityLayer, ReshapeLayer)
 from lasagne.nonlinearities import (
-    LeakyRectify, rectify, sigmoid, softmax)
+    LeakyRectify, rectify, sigmoid, softmax, tanh)
 import numpy as np
 from PIL import Image
 from progressbar import Bar, ProgressBar, Percentage, Timer
@@ -38,6 +38,7 @@ lrelu = LeakyRectify(0.2)
 
 N_WORDS = 192
 L_GEN = 32
+GRAD_CLIP = 100
 
 # ##################### UTIL #####################
 
@@ -142,7 +143,7 @@ class OneHotEncoding(SourcewiseTransformer):
         for i in range(self.num_classes):
             output[source_batch == i, i] = 1
         output = output.reshape((shape[0], shape[1], self.num_classes))
-        return output.transpose(0, 2, 1)
+        return output
 
 def load_stream(batch_size=64, source=None):
     if source is None:
@@ -154,33 +155,279 @@ def load_stream(batch_size=64, source=None):
             
 # ##################### MODEL #####################
 
-def build_generator(input_var=None, dim_h=256, n_steps=3):
-    layer = InputLayer(shape=(None, 100), input_var=input_var)
+class BatchNormalizedLSTMLayer(LSTMLayer):
+    def __init__(self, incoming, num_units,
+                 ingate=Gate(),
+                 forgetgate=Gate(),
+                 cell=Gate(W_cell=None, nonlinearity=nonlinearities.tanh),
+                 outgate=Gate(),
+                 nonlinearity=nonlinearities.tanh,
+                 cell_init=init.Constant(0.),
+                 hid_init=init.Constant(0.),
+                 backwards=False,
+                 learn_init=False,
+                 peepholes=True,
+                 gradient_steps=-1,
+                 grad_clipping=0,
+                 unroll_scan=False,
+                 precompute_input=True,
+                 mask_input=None,
+                 only_return_final=False,
+                 batch_axes=(0,),
+                 **kwargs):
 
-    # fully-connected layer
-    #batch_norm = lambda x: x
-    layer = batch_norm(DenseLayer(layer, dim_h * L_GEN, nonlinearity=None))
-    layer = ReshapeLayer(layer, ([0], dim_h, L_GEN))
+        # Initialize parent layer
+        super(BatchNormalizedLSTMLayer, self).__init__(incoming, num_units,
+                                                               ingate, forgetgate, cell, outgate,
+                                                               nonlinearity, cell_init, hid_init,
+                                                               backwards, learn_init, peepholes,
+                                                               gradient_steps, grad_clipping,
+                                                               unroll_scan, precompute_input, mask_input,
+                                                               only_return_final, **kwargs)
+
+        input_shape = self.input_shapes[0]
+
+        # create BN layer with input shape (n_steps, batch_size, 4*num_units) and given axes
+        self.bn_input = BatchNormLayer((input_shape[1], input_shape[0], 4*self.num_units), beta=None,
+                                       gamma=init.Constant(0.1), axes=batch_axes)
+        self.params.update(self.bn_input.params)  # make BN params your params
+
+        # create batch normalization parameters for hidden units; the shape is (time_steps, num_units)
+        self.epsilon = np.float32(1e-4)
+        self.alpha = theano.shared(np.float32(0.1))
+        shape = (input_shape[1], 4*num_units)
+        self.gamma = self.add_param(init.Constant(0.1), shape, 'gamma', trainable=True, regularizable=True)
+        self.running_mean = self.add_param(init.Constant(0), (input_shape[1], 4*num_units,), 'running_mean',
+                                           trainable=False, regularizable=False)
+        self.running_inv_std = self.add_param(init.Constant(1), (input_shape[1], 4*num_units,), 'running_inv_std',
+                                              trainable=False, regularizable=False)
+        self.running_mean_clone = theano.clone(self.running_mean, share_inputs=False)
+        self.running_inv_std_clone = theano.clone(self.running_inv_std, share_inputs=False)
+        self.running_mean_clone.default_update = self.running_mean_clone
+        self.running_inv_std_clone.default_update = self.running_inv_std_clone
+
+    def get_output_for(self, inputs, deterministic=False, **kwargs):
+        # Retrieve the layer input
+        input = inputs[0]
+        # Retrieve the mask when it is supplied
+        mask = None
+        hid_init = None
+        cell_init = None
+        if self.mask_incoming_index > 0:
+            mask = inputs[self.mask_incoming_index]
+        if self.hid_init_incoming_index > 0:
+            hid_init = inputs[self.hid_init_incoming_index]
+        if self.cell_init_incoming_index > 0:
+            cell_init = inputs[self.cell_init_incoming_index]
+
+        # Treat all dimensions after the second as flattened feature dimensions
+        if input.ndim > 3:
+            input = T.flatten(input, 3)
+
+        # Because scan iterates over the first dimension we dimshuffle to
+        # (n_time_steps, n_batch, n_features)
+        input = input.dimshuffle(1, 0, 2)
+        seq_len, num_batch, _ = input.shape
+
+        # Stack input weight matrices into a (num_inputs, 4*num_units)
+        # matrix, which speeds up computation
+        W_in_stacked = T.concatenate(
+            [self.W_in_to_ingate, self.W_in_to_forgetgate,
+             self.W_in_to_cell, self.W_in_to_outgate], axis=1)
+
+        # Same for hidden weight matrices
+        W_hid_stacked = T.concatenate(
+            [self.W_hid_to_ingate, self.W_hid_to_forgetgate,
+             self.W_hid_to_cell, self.W_hid_to_outgate], axis=1)
+
+        # Stack biases into a (4*num_units) vector
+        b_stacked = T.concatenate(
+            [self.b_ingate, self.b_forgetgate,
+             self.b_cell, self.b_outgate], axis=0)
+
+        input = self.bn_input.get_output_for(T.dot(input, W_in_stacked)) + b_stacked
+
+        # At each call to scan, input_n will be (n_time_steps, 4*num_units).
+        # We define a slicing function that extract the input to each LSTM gate
+        def slice_w(x, n):
+            return x[:, n*self.num_units:(n+1)*self.num_units]
+
+        # Create single recurrent computation step function
+        # input_n is the n'th vector of the input
+        def step(input_n, gamma, time_step, cell_previous, hid_previous, *args):
+            hidden = T.dot(hid_previous, W_hid_stacked)
+
+            # batch normalization of hidden states
+            if deterministic:
+                mean = self.running_mean[time_step]
+                inv_std = self.running_inv_std[time_step]
+            else:
+                mean = hidden.mean(0)
+                inv_std = T.inv(T.sqrt(hidden.var(0) + self.epsilon))
+
+                self.running_mean_clone.default_update = \
+                    T.set_subtensor(self.running_mean_clone.default_update[time_step],
+                        (1-self.alpha) * self.running_mean_clone.default_update[time_step] + self.alpha * mean)
+                self.running_inv_std_clone.default_update = \
+                    T.set_subtensor(self.running_inv_std_clone.default_update[time_step],
+                        (1-self.alpha) * self.running_inv_std_clone.default_update[time_step] + self.alpha * inv_std)
+                mean += 0 * self.running_mean_clone[time_step]
+                inv_std += 0 * self.running_inv_std_clone[time_step]
+
+            gamma = gamma.dimshuffle('x', 0)
+            mean = mean.dimshuffle('x', 0)
+            inv_std = inv_std.dimshuffle('x', 0)
+
+            # normalize
+            normalized = (hidden - mean) * (gamma * inv_std)
+
+            # Calculate gates pre-activations and slice
+            gates = input_n + normalized
+
+            # Clip gradients
+            if self.grad_clipping:
+                gates = theano.gradient.grad_clip(
+                    gates, -self.grad_clipping, self.grad_clipping)
+
+            # Extract the pre-activation gate values
+            ingate = slice_w(gates, 0)
+            forgetgate = slice_w(gates, 1)
+            cell_input = slice_w(gates, 2)
+            outgate = slice_w(gates, 3)
+
+            if self.peepholes:
+                # Compute peephole connections
+                ingate += cell_previous*self.W_cell_to_ingate
+                forgetgate += cell_previous*self.W_cell_to_forgetgate
+
+            # Apply nonlinearities
+            ingate = self.nonlinearity_ingate(ingate)
+            forgetgate = self.nonlinearity_forgetgate(forgetgate)
+            cell_input = self.nonlinearity_cell(cell_input)
+
+            # Compute new cell value
+            cell = forgetgate*cell_previous + ingate*cell_input
+
+            if self.peepholes:
+                outgate += cell*self.W_cell_to_outgate
+            outgate = self.nonlinearity_outgate(outgate)
+
+            # Compute new hidden unit activation
+            hid = outgate*self.nonlinearity(cell)
+            return [cell, hid]
+
+        def step_masked(input_n, mask_n, gamma, time_step, cell_previous, hid_previous, *args):
+            cell, hid = step(input_n, gamma, time_step, cell_previous, hid_previous, *args)
+
+            # Skip over any input with mask 0 by copying the previous
+            # hidden state; proceed normally for any input with mask 1.
+            cell = T.switch(mask_n, cell, cell_previous)
+            hid = T.switch(mask_n, hid, hid_previous)
+
+            return [cell, hid]
+
+        if mask is not None:
+            # mask is given as (batch_size, seq_len). Because scan iterates
+            # over first dimension, we dimshuffle to (seq_len, batch_size) and
+            # add a broadcastable dimension
+            mask = mask.dimshuffle(1, 0, 'x')
+            sequences = [input, mask]
+            step_fun = step_masked
+        else:
+            sequences = [input, ]
+            step_fun = step
+
+        time_steps = np.asarray(np.arange(self.input_shapes[0][1]), dtype=np.int32)
+        sequences.extend([self.gamma, time_steps])
+
+        ones = T.ones((num_batch, 1))
+        if not isinstance(self.cell_init, Layer):
+            # Dot against a 1s vector to repeat to shape (num_batch, num_units)
+            cell_init = T.dot(ones, self.cell_init)
+
+        if not isinstance(self.hid_init, Layer):
+            # Dot against a 1s vector to repeat to shape (num_batch, num_units)
+            hid_init = T.dot(ones, self.hid_init)
+
+        # The hidden-to-hidden weight matrix is always used in step
+        non_seqs = [W_hid_stacked]
+        # The "peephole" weight matrices are only used when self.peepholes=True
+        if self.peepholes:
+            non_seqs += [self.W_cell_to_ingate,
+                         self.W_cell_to_forgetgate,
+                         self.W_cell_to_outgate]
+
+        non_seqs += [self.running_mean, self.running_inv_std]
+
+        if self.unroll_scan:
+            # Retrieve the dimensionality of the incoming layer
+            input_shape = self.input_shapes[0]
+            # Explicitly unroll the recurrence instead of using scan
+            cell_out, hid_out = unroll_scan(
+                fn=step_fun,
+                sequences=sequences,
+                outputs_info=[cell_init, hid_init],
+                go_backwards=self.backwards,
+                non_sequences=non_seqs,
+                n_steps=input_shape[1])
+        else:
+            # Scan op iterates over first dimension of input and repeatedly
+            # applies the step function
+            cell_out, hid_out = theano.scan(
+                fn=step_fun,
+                sequences=sequences,
+                outputs_info=[cell_init, hid_init],
+                go_backwards=self.backwards,
+                truncate_gradient=self.gradient_steps,
+                non_sequences=non_seqs,
+                strict=True)[0]
+
+        # When it is requested that we only return the final sequence step,
+        # we need to slice it out immediately after scan is applied
+        if self.only_return_final:
+            hid_out = hid_out[-1]
+        else:
+            # dimshuffle back to (n_batch, n_time_steps, n_features))
+            hid_out = hid_out.dimshuffle(1, 0, 2)
+
+            # if scan is backward reverse the output
+            if self.backwards:
+                hid_out = hid_out[:, ::-1]
+
+        return hid_out
+
+def build_generator(input_var=None, dim_h=128, n_steps=1):
+    layer = InputLayer(shape=(None, None, 10), input_var=input_var)
+
     for i in range(n_steps):
-        layer_ = NonlinearityLayer(layer, rectify)
-        layer_ = batch_norm(Conv1DLayer(layer_, dim_h, 5, stride=1, pad=2))
-        layer_ = batch_norm(Conv1DLayer(layer_, dim_h, 5, stride=1, pad=2, nonlinearity=None))
-        layer = ElemwiseSumLayer([layer, layer_])
-    layer = NonlinearityLayer(layer, rectify)
-    layer = batch_norm(Conv1DLayer(layer, N_WORDS, 5, stride=1, pad=2, nonlinearity=None))
+        layer = BatchNormalizedLSTMLayer(
+            layer, dim_h, grad_clipping=GRAD_CLIP,
+            nonlinearity=tanh)
+        layer = BatchNormalizedLSTMLayer(
+            layer, dim_h, grad_clipping=GRAD_CLIP,
+            nonlinearity=tanh, backwards=True)
+        
+    layer = LSTMLayer(
+        layer, dim_h, grad_clipping=GRAD_CLIP, nonlinearity=tanh)
+    layer = ReshapeLayer(layer, (-1, dim_h))
+    layer = DenseLayer(layer, N_WORDS, nonlinearity=None)
+    layer = ReshapeLayer(layer, (-1, L_GEN, N_WORDS))
+    
     logger.debug('Generator output: {}'.format(layer.output_shape))
     return layer
 
-def build_discriminator(input_var=None, dim_h=256, n_steps=3):
-    layer = InputLayer(shape=(None, N_WORDS, L_GEN), input_var=input_var)
-    layer = Conv1DLayer(layer, dim_h, 5, stride=1, pad=2, nonlinearity=None)
+def build_discriminator(input_var=None, dim_h=128, n_steps=1):
+    layer = InputLayer(shape=(None, None, N_WORDS), input_var=input_var)
     for i in range(n_steps):
-        layer_ = NonlinearityLayer(layer, lrelu)
-        layer_ = Conv1DLayer(layer_, dim_h, 5, stride=1, pad=2)
-        layer_ = Conv1DLayer(layer_, dim_h, 5, stride=1, pad=2, nonlinearity=None)
-        layer = ElemwiseSumLayer([layer, layer_])
-    layer = NonlinearityLayer(layer, lrelu)
+        layer = LSTMLayer(
+            layer, dim_h, grad_clipping=GRAD_CLIP,
+            nonlinearity=tanh)
+        layer = LSTMLayer(
+            layer, dim_h, grad_clipping=GRAD_CLIP,
+            nonlinearity=tanh)
+    layer = ReshapeLayer(layer, (-1, dim_h))
     layer = DenseLayer(layer, 1, nonlinearity=None)
+    layer = ReshapeLayer(layer, (-1, L_GEN))
     
     logger.debug('Discriminator output: {}'.format(layer.output_shape))
     return layer
@@ -220,8 +467,7 @@ def norm_exp(log_factor):
 def BGAN(discriminator, g_output_logit, n_samples, trng, batch_size=64):
     d = OrderedDict()
     d['g_output_logit'] = g_output_logit
-    g_output_logit_ = g_output_logit.transpose(0, 2, 1)
-    g_output_logit_ = g_output_logit_.reshape((-1, N_WORDS))
+    g_output_logit_ = g_output_logit.reshape((-1, N_WORDS))
     d['g_output_logit_'] = g_output_logit_
     
     g_output = T.nnet.softmax(g_output_logit_)
@@ -241,8 +487,8 @@ def BGAN(discriminator, g_output_logit, n_samples, trng, batch_size=64):
     D_r = lasagne.layers.get_output(discriminator)
     D_f = lasagne.layers.get_output(
         discriminator,
-        samples.transpose(0, 1, 3, 2).reshape((-1, N_WORDS, L_GEN)))
-    D_f_ = D_f.reshape((n_samples, -1))
+        samples.reshape((-1, L_GEN, N_WORDS)))
+    D_f_ = D_f.reshape((n_samples, -1, L_GEN))
     d.update(D_r=D_r, D_f=D_f, D_f_=D_f_)
     
     log_d1 = -T.nnet.softplus(-D_f_)
@@ -255,9 +501,8 @@ def BGAN(discriminator, g_output_logit, n_samples, trng, batch_size=64):
     log_Z_est = theano.gradient.disconnected_grad(log_Z_est)
     d['log_Z_est'] = log_Z_est
 
-    g_output_logit = g_output_logit.transpose(0, 2, 1)
     log_g = (samples * (g_output_logit - log_sum_exp2(
-        g_output_logit, axis=2))[None, :, :, :]).sum(axis=(2, 3))
+        g_output_logit, axis=2))[None, :, :, :]).sum(axis=3)
     d['log_g'] = log_g
     
     log_N = T.log(log_w.shape[0]).astype(floatX)
@@ -270,6 +515,8 @@ def BGAN(discriminator, g_output_logit, n_samples, trng, batch_size=64):
     generator_loss = -(w_tilde_ * log_g).sum(0).mean()
     discriminator_loss = (T.nnet.softplus(-D_r)).mean() + (
         T.nnet.softplus(-D_f)).mean() + D_f.mean()
+    d.update(generator_loss=generator_loss,
+             discriminator_loss=discriminator_loss)
     
     return generator_loss, discriminator_loss, D_r, D_f, log_Z_est, d
 
@@ -279,7 +526,7 @@ def summarize(results, samples, gt_samples, r_vocab, out_dir=None):
     results = dict((k, np.mean(v)) for k, v in results.items())    
     logger.info(results)
     
-    gt_samples = np.argmax(gt_samples, axis=1)
+    gt_samples = np.argmax(gt_samples, axis=2)
     strs = []
     for gt_sample in gt_samples:
         s = ''.join([r_vocab[c] for c in gt_sample])
@@ -287,7 +534,7 @@ def summarize(results, samples, gt_samples, r_vocab, out_dir=None):
     logger.info('GT:')
     logger.info(strs)
     
-    samples = np.argmax(samples, axis=1)
+    samples = np.argmax(samples, axis=2)
     strs = []
     for sample in samples:
         s = ''.join([r_vocab[c] for c in sample])
@@ -299,14 +546,14 @@ def main(source=None, vocab=None, num_epochs=None, learning_rate=None, beta=None
          dim_noise=None, batch_size=None, n_samples=None,
          n_steps=None,
          print_freq=None, image_dir=None, binary_dir=None, gt_image_dir=None,
-         summary_updates=1000, debug=False):
+         summary_updates=100, debug=False):
     
     # Load the dataset
     stream, train_samples = load_stream(source=source, batch_size=batch_size)
     r_vocab = dict((v, k) for k, v in vocab.items())
     
     # VAR
-    noise = T.matrix('noise')
+    noise = T.tensor3('noise')
     input_var = T.tensor3('inputs')
     
     # MODELS
@@ -323,7 +570,7 @@ def main(source=None, vocab=None, num_epochs=None, learning_rate=None, beta=None
     if debug:
         batch = stream.get_epoch_iterator().next()[0]
         noise_ = lasagne.utils.floatX(np.random.rand(batch.shape[0],
-                                                     dim_noise))
+                                                     L_GEN, dim_noise))
         print batch.shape
         for k, v in d.items():
             print 'Testing {}'.format(k)
@@ -335,7 +582,6 @@ def main(source=None, vocab=None, num_epochs=None, learning_rate=None, beta=None
         discriminator, trainable=True)
     generator_params = lasagne.layers.get_all_params(
         generator, trainable=True)
-    
     
     l_kwargs = dict(learning_rate=learning_rate, beta1=beta)
     
@@ -370,8 +616,8 @@ def main(source=None, vocab=None, num_epochs=None, learning_rate=None, beta=None
             widgets=widgets, maxval=(train_samples // batch_size)).start()
         
         for batch in stream.get_epoch_iterator():
-            noise = lasagne.utils.floatX(np.random.rand(batch[0].shape[0],
-                                                        dim_noise))
+            noise = lasagne.utils.floatX(np.random.rand(
+                batch[0].shape[0], L_GEN, dim_noise))
             disc_train_fn(batch[0].astype(floatX), noise)
             outs = gen_train_fn(batch[0].astype(floatX), noise)
             update_dict_of_lists(results, **outs)
@@ -380,23 +626,19 @@ def main(source=None, vocab=None, num_epochs=None, learning_rate=None, beta=None
             if u % summary_updates == 0:
                 try:
                     samples = gen_fn(lasagne.utils.floatX(
-                        np.random.rand(10, dim_noise)))
+                        np.random.rand(10, L_GEN, dim_noise)))
                     summarize(results, samples, batch[0][:10], r_vocab)
-                except:
+                except Exception as e:
+                    print(e)
                     pass
         logger.info('Epoch {} of {} took {:.3f}s'.format(
             epoch + 1, num_epochs, time.time() - start_time))
-        '''        
-        if epoch >= num_epochs // 2:
-            progress = float(epoch) / num_epochs
-            eta.set_value(lasagne.utils.floatX(initial_eta * 2 * (1 - progress)))
-        '''
 
 _defaults = dict(
     learning_rate=1e-3,
     beta=0.5,
     num_epochs=100,
-    dim_noise=100,
+    dim_noise=10,
     batch_size=64,
     n_samples=20,
     print_freq=50
