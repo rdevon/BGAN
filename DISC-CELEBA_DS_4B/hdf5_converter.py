@@ -2,7 +2,7 @@ from PIL import Image
 import h5py
 import numpy as np
 import os
-from bfuel.datasets.hdf5 import H5PYDataset
+from fuel.datasets.hdf5 import H5PYDataset
 
 
 def normalize(x):
@@ -82,7 +82,7 @@ class FileData:
 
         f = h5py.File('anime_faces.hdf5', mode='w')
 
-        anime_faces = f.create_dataset('anime_faces', (0, index), dtype = 'uint8')
+        anime_faces = f.create_dataset('features', anime_npy.shape, dtype = 'uint8')
 
         split_dict = {'train': {'features': (0, index)},
                       'test': {'features': (0, index)}}
