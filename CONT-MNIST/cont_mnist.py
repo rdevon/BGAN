@@ -20,6 +20,7 @@ import theano.tensor as T
 
 
 lrelu = LeakyRectify(0.2)
+floatX = lasagne.utils.floatX
 
 # ##################### UTIL #####################
 
@@ -181,8 +182,8 @@ class Deconv2DLayer(lasagne.layers.Layer):
             conved += self.b.dimshuffle('x', 0, 'x', 'x')
         return self.nonlinearity(conved)
 
-def build_generator(input_var=None):
-    layer = InputLayer(shape=(None, 100), input_var=input_var)
+def build_generator(input_var=None, dim_z=100):
+    layer = InputLayer(shape=(None, dim_z), input_var=input_var)
     layer = batch_norm(DenseLayer(layer, 1024))
     layer = batch_norm(DenseLayer(layer, 128 * 7 * 7))
     layer = ReshapeLayer(layer, ([0], 128, 7, 7))
@@ -260,7 +261,8 @@ def GAN(fake_out, real_out):
 
 def main(num_epochs=None, method=None, batch_size=None,
          learning_rate=None, beta=None,
-         image_dir=None, binary_dir=None):
+         image_dir=None, binary_dir=None,
+         prior=None, dim_z=None):
     
     # DATA
     X_train, y_train, X_val, y_val, X_test, y_test = load_dataset()
@@ -273,7 +275,7 @@ def main(num_epochs=None, method=None, batch_size=None,
 
     # MODEL
     logger.info('Building model and graph')
-    generator = build_generator(noise_var)
+    generator = build_generator(noise_var, dim_z=dim_z)
     discriminator = build_discriminator(input_var)
 
     # GRAPH
@@ -348,7 +350,11 @@ def main(num_epochs=None, method=None, batch_size=None,
             inputs, targets = batch
             if batch0 is None: batch0 = inputs
             
-            noise = lasagne.utils.floatX(np.random.rand(len(inputs), 100))
+            if prior == 'uniform':
+                noise = floatX(np.random.rand(len(inputs), dim_z))
+            elif prior == 'gaussian':
+                noise = floatX(numpy.random.normal(size=(len(inputs), dim_z)))
+                
             outs = train_fn(noise, inputs)
             outs = dict((k, np.asarray(v)) for k, v in outs.items())
             
@@ -361,8 +367,11 @@ def main(num_epochs=None, method=None, batch_size=None,
                  **results)
             
         try:
-            samples = gen_fn(lasagne.utils.floatX(
-                np.random.rand(64, dim_noise)))
+            if prior == 'uniform':
+                noise = floatX(np.random.rand(64, dim_z))
+            elif prior == 'gaussian':
+                noise = floatX(numpy.random.normal(size=(64, dim_z)))
+            samples = gen_fn(noise)
             summarize(results, samples, train_batches=u,
                       image_dir=image_dir, prefix=prefix)
         except Exception as e:
@@ -390,8 +399,9 @@ _defaults = dict(
     num_epochs=100,
     dim_noise=100,
     batch_size=64,
-    method='BGAN'
-    
+    method='BGAN',
+    dim_z=10,
+    prior='gaussian'
 )
 
 def make_argument_parser():
@@ -409,7 +419,6 @@ def make_argument_parser():
     parser.add_argument('-o', '--out_path', default=None,
                         help='Output path for stuff')
     parser.add_argument('-n', '--name', default=None)
-    parser.add_argument('-V', '--vocab', type=str, default=None)
     parser.add_argument('-v', '--verbosity', type=int, default=1,
                         help='Verbosity of the logging. (0, 1, 2)')
     return parser
