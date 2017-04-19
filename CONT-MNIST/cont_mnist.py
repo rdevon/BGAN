@@ -6,6 +6,7 @@ import argparse
 import logging
 import sys
 import os
+from os import path
 import time
 
 import lasagne
@@ -14,11 +15,16 @@ from lasagne.nonlinearities import sigmoid, LeakyRectify, sigmoid
 from lasagne.layers import (
     batch_norm, DenseLayer, InputLayer, ReshapeLayer)
 from lasagne.layers.dnn import Conv2DDNNLayer as Conv2DLayer  # override
+from matplotlib import pyplot as plt
 import numpy as np
+from progressbar import Bar, ProgressBar, Percentage, Timer
 import theano
 import theano.tensor as T
 
 
+DIM_X = 28
+DIM_Y = 28
+DIM_C = 1
 lrelu = LeakyRectify(0.2)
 
 # ##################### UTIL #####################
@@ -142,7 +148,7 @@ def iterate_minibatches(inputs, targets, batchsize, shuffle=False):
         else:
             excerpt = slice(start_idx, start_idx + batchsize)
         yield inputs[excerpt], targets[excerpt]
-
+        
 ##################### MODEL #######################
 
 class Deconv2DLayer(lasagne.layers.Layer):
@@ -233,14 +239,16 @@ def BGAN(fake_out, real_out, log_Z, use_Z=True):
     log_N = T.log(log_w.shape[0]).astype(log_w.dtype)
     log_Z_est = log_sum_exp(log_w - log_N, axis=0)
     log_Z_est = theano.gradient.disconnected_grad(log_Z_est)
-         
+    log_w_tilde = log_w - T.shape_padleft(log_Z_est) - log_N
+    w_tilde = T.exp(log_w_tilde)
+        
     if use_Z:
         generator_loss = ((fake_out - log_Z) ** 2).mean()
     else:
         generator_loss = (fake_out ** 2).mean()
     discriminator_loss = T.nnet.softplus(-real_out).mean() + (
         T.nnet.softplus(-fake_out) + fake_out).mean()
-    return generator_loss, discriminator_loss, log_w, log_Z_est
+    return generator_loss, discriminator_loss, log_w, w_tilde, log_Z_est
 
 def GAN(fake_out, real_out):
     log_d1 = -T.nnet.softplus(-fake_out)
@@ -250,13 +258,25 @@ def GAN(fake_out, real_out):
     log_N = T.log(log_w.shape[0]).astype(log_w.dtype)
     log_Z_est = log_sum_exp(log_w - log_N, axis=0)
     log_Z_est = theano.gradient.disconnected_grad(log_Z_est)
+    log_w_tilde = log_w - T.shape_padleft(log_Z_est) - log_N
+    w_tilde = T.exp(log_w_tilde)
          
     generator_loss = T.nnet.softplus(-fake_out).mean()
     discriminator_loss = T.nnet.softplus(-real_out).mean() + (
         T.nnet.softplus(-fake_out) + fake_out).mean()
-    return generator_loss, discriminator_loss, log_w, log_Z_est
+    return generator_loss, discriminator_loss, log_w, w_tilde, log_Z_est
 
 # ############################## MAIN ################################
+
+def summarize(results, samples, image_dir=None, prefix=''):
+    results = dict((k, np.mean(v)) for k, v in results.items())
+    logger.info(results)
+    if image_dir is not None:
+        plt.imsave(path.join(image_dir, '{}.png'.format(prefix)),
+                   (samples.reshape(10, 10, 28, 28)
+                    .transpose(0, 2, 1, 3)
+                    .reshape(10 * 28, 10 * 28)),
+                   cmap='gray')
 
 def main(num_epochs=None, method=None, batch_size=None,
          learning_rate=None, beta=None,
@@ -282,13 +302,13 @@ def main(num_epochs=None, method=None, batch_size=None,
         discriminator, lasagne.layers.get_output(generator))
 
     if method == 'BGAN':
-        generator_loss, discriminator_loss, log_w, log_Z_est = BGAN(
+        generator_loss, discriminator_loss, log_w, w_tilde, log_Z_est = BGAN(
             fake_out, real_out, log_Z)
-        other_loss, _, _, _ = GAN(fake_out, real_out)
+        other_loss, _, _, _, _ = GAN(fake_out, real_out)
     elif method == 'GAN':
-        generator_loss, discriminator_loss, log_w, log_Z_est = GAN(
+        generator_loss, discriminator_loss, log_w, w_tilde, log_Z_est = GAN(
             fake_out, real_out)
-        other_loss, _, _, _ = BGAN(fake_out, real_out, log_Z)
+        other_loss, _, _, _, _ = BGAN(fake_out, real_out, log_Z)
     else:
         raise NotImplementedError('Unsupported method `{}`'.format(method))
 
@@ -297,12 +317,12 @@ def main(num_epochs=None, method=None, batch_size=None,
     discriminator_params = lasagne.layers.get_all_params(discriminator,
                                                          trainable=True)
     
-    eta = theano.shared(lasagne.utils.floatX(initial_eta))
+    eta = theano.shared(lasagne.utils.floatX(learning_rate))
     
     updates = lasagne.updates.adam(
-        generator_loss, generator_params, learning_rate=eta, beta1=0.5)
+        generator_loss, generator_params, learning_rate=eta, beta1=beta)
     updates.update(lasagne.updates.adam(
-        discriminator_loss, discriminator_params, learning_rate=eta, beta1=0.5))
+        discriminator_loss, discriminator_params, learning_rate=eta, beta1=beta))
     updates.update([(log_Z, 0.95 * log_Z + 0.05 * log_Z_est.mean())])
 
     # COMPILE
@@ -316,6 +336,7 @@ def main(num_epochs=None, method=None, batch_size=None,
         'log Z est': log_Z_est.mean(),
         'log_Z est var': log_Z_est.std() ** 2,
         'log w': log_w.mean(),
+        'log w var': log_w.std() ** 2,
         'norm w': w_tilde.mean(),
         'norm w var': w_tilde.std() ** 2,
         'ESS': (1. / (w_tilde ** 2).sum(0)).mean()
@@ -362,9 +383,9 @@ def main(num_epochs=None, method=None, batch_size=None,
             
         try:
             samples = gen_fn(lasagne.utils.floatX(
-                np.random.rand(64, dim_noise)))
-            summarize(results, samples, train_batches=u,
-                      image_dir=image_dir, prefix=prefix)
+                np.random.rand(100, 100)))
+            summarize(results, samples, image_dir=image_dir,
+                      prefix=prefix)
         except Exception as e:
             print(e)
             pass
@@ -385,13 +406,11 @@ def main(num_epochs=None, method=None, batch_size=None,
 
 
 _defaults = dict(
-    learning_rate=1e-3,
+    learning_rate=1e-2,
     beta=0.5,
-    num_epochs=100,
-    dim_noise=100,
+    num_epochs=200,
     batch_size=64,
-    method='BGAN'
-    
+    method='BGAN'    
 )
 
 def make_argument_parser():
@@ -422,19 +441,17 @@ def setup_out_dir(out_path, name=None):
         
     binary_dir = path.join(out_path, 'binaries')
     image_dir = path.join(out_path, 'images')
-    gt_image_dir = path.join(out_path, 'gt_images')
     if not path.isdir(out_path):
         logger.info('Creating out path `{}`'.format(out_path))
         os.mkdir(out_path)
         os.mkdir(binary_dir)
         os.mkdir(image_dir)
-        os.mkdir(gt_image_dir)
         
     logger.info('Setting out path to `{}`'.format(out_path))
     logger.info('Logging to `{}`'.format(path.join(out_path, 'out.log')))
     set_file_logger(path.join(out_path, 'out.log'))
         
-    return dict(binary_dir=binary_dir, image_dir=image_dir, gt_image_dir=gt_image_dir)
+    return dict(binary_dir=binary_dir, image_dir=image_dir)
 
 if __name__ == '__main__':
     parser = make_argument_parser()
