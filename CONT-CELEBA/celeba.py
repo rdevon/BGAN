@@ -464,11 +464,10 @@ def config(data_args, model_args, optimizer_args, train_args,
     if config_file is not None:
         with open(config_file, 'r') as f:
             d = yaml.load(f)
-        
+        logger.info('Loading config {}'.format(d))
         model_args.update(**d.get('model_args', {}))
         optimizer_args.update(**d.get('optimizer_args', {}))
         train_args.update(**d.get('train_args', {}))
-        visualizer_args.update(**d.get('visualizer_args', {}))
         data_args.update(**d.get('data_args', {}))
 
 
@@ -519,5 +518,9 @@ if __name__ == '__main__':
     train_args.update(**_default_train_args)
     config(data_args, model_args, optimizer_args, train_args,
            config_file=args.config_file)
+    
+    logger.info('Training model with: \ndata args {}, \noptimizer args {} '
+                '\nmodel args {} \ntrain args {}'.format(
+                    data_args, optimizer_args, model_args, train_args))
     
     main(data_args, optimizer_args, model_args, train_args, **kwargs)  
