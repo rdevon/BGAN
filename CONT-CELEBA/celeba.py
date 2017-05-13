@@ -26,6 +26,7 @@ import pylab as pl
 import theano
 import theano.tensor as T
 import scipy.misc
+import yaml
 
 
 lrelu = LeakyRectify(0.02)
