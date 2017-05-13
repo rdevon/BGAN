@@ -389,7 +389,8 @@ def main(data_args, optimizer_args, model_args, train_args,
                     result_summary = dict((k, np.mean(v)) for k, v in results.items())
                     logger.info(result_summary)
                     
-                    samples = gen_fn(lasagne.utils.floatX(np.random.rand(5000, 100)))
+                    samples = gen_fn(lasagne.utils.floatX(np.random.rand(
+                        5000, model_args['dim_z'])))
                     samples_print = samples[0:64]
                     print_images(inverse_transform(samples_print), 8, 8,
                                  file=path.join(image_dir, prefix + '_gen_tmp.png'))
@@ -397,7 +398,8 @@ def main(data_args, optimizer_args, model_args, train_args,
         logger.info('Total Epoch {} of {} took {:.3f}s'.format(
             epoch + 1, train_args['epochs'], time.time() - start_time))
         
-        samples = gen_fn(lasagne.utils.floatX(np.random.rand(5000, 100)))
+        samples = gen_fn(lasagne.utils.floatX(np.random.rand(
+            5000, model_args['dim_z'])))
         samples_print = samples[0:64]
         print_images(inverse_transform(samples_print), 8, 8,
                      file=path.join(image_dir, prefix + '_gen.png'))
