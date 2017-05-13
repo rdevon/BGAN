@@ -289,17 +289,21 @@ def main(data_args, optimizer_args, model_args, train_args,
 
     log_Z_est = None
     loss = model_args['loss']
-    loss_args = model_args['loss_args']
+    loss_args = model_args.get('loss_args', {})
     if loss == 'bgan':
+        logger.info('Using BGAN')
         generator_loss, discriminator_loss = BGAN(
             fake_out, real_out, log_Z, **loss_args)
         log_Z_est = est_log_Z(fake_out)
     elif loss == 'gan':
+        logger.info('Using normal GAN')
         generator_loss, discriminator_loss = GAN(fake_out, real_out)
         log_Z_est = est_log_Z(fake_out)
     elif loss == 'lsgan':
+        logger.info('Using LSGAN')
         generator_loss, discriminator_loss = LSGAN(fake_out, real_out)
     elif loss == 'wgan':
+        logger.info('Using WGAN')
         generator_loss, discriminator_loss = WGAN(fake_out, real_out)
         
     # OPTIMIZER
@@ -312,6 +316,11 @@ def main(data_args, optimizer_args, model_args, train_args,
         generator_loss, generator_params, **optimizer_args)
     discriminator_updates = lasagne.updates.adam(
         discriminator_loss, discriminator_params, **optimizer_args)
+    if loss == 'wgan':
+        for k in discriminator_updates.keys():
+            if k.name == 'W':
+                discriminator_updates[k] = T.clip(
+                    discriminator_updates[k], -0.01, 0.01)
     
     if log_Z_est is not None:
         generator_updates.update(
@@ -324,10 +333,13 @@ def main(data_args, optimizer_args, model_args, train_args,
     
     g_results = {
         'p(fake)': (fake_out < 0.).mean(),
-        'L_G': generator_loss,
-        'log Z': log_Z,
-        'log Z (est)': log_Z_est.mean()
+        'L_G': generator_loss
     }
+    if log_Z_est is not None:
+        g_results.update(**{
+            'log Z': log_Z,
+            'log Z (est)': log_Z_est.mean()
+        })
 
     # COMPILE
     train_discriminator = theano.function([noise_var, input_var],
@@ -359,10 +371,10 @@ def main(data_args, optimizer_args, model_args, train_args,
             noise = lasagne.utils.floatX(
                 np.random.rand(len(inputs), model_args['dim_z']))
 
-            train_discriminator(noise, inputs)
-            disc_train_out = train_discriminator(noise, inputs)
-            d_outs = disc_train_out
-            update_dict_of_lists(results, **d_outs)
+            for i in range(train_args['num_iter_disc']):
+                d_outs = train_discriminator(noise, inputs)
+                d_outs =  dict((k, np.asarray(v)) for k, v in d_outs.items())
+                update_dict_of_lists(results, **d_outs)
 
             for i in range(train_args['num_iter_gen']):
                 g_outs = train_generator(noise)
@@ -411,6 +423,7 @@ def make_argument_parser():
                         help='Output path for stuff')
     parser.add_argument('-n', '--name', default=None)
     parser.add_argument('-S', '--source', type=str, default=None)
+    parser.add_argument('-c', '--config_file', default=None)
     parser.add_argument('-v', '--verbosity', type=int, default=1,
                         help='Verbosity of the logging. (0, 1, 2)')
     return parser
@@ -428,8 +441,11 @@ def setup_out_dir(out_path, name=None):
     if not path.isdir(out_path):
         logger.info('Creating out path `{}`'.format(out_path))
         os.mkdir(out_path)
+    if not path.isdir(binary_dir):
         os.mkdir(binary_dir)
+    if not path.isdir(image_dir):
         os.mkdir(image_dir)
+    if not path.isdir(gt_image_dir):
         os.mkdir(gt_image_dir)
         
     logger.info('Setting out path to `{}`'.format(out_path))
@@ -438,17 +454,31 @@ def setup_out_dir(out_path, name=None):
         
     return dict(binary_dir=binary_dir, image_dir=image_dir)
 
+
+def config(data_args, model_args, optimizer_args, train_args,
+           config_file=None):
+    if config_file is not None:
+        with open(config_file, 'r') as f:
+            d = yaml.load(f)
+        
+        model_args.update(**d.get('model_args', {}))
+        optimizer_args.update(**d.get('optimizer_args', {}))
+        train_args.update(**d.get('train_args', {}))
+        visualizer_args.update(**d.get('visualizer_args', {}))
+        data_args.update(**d.get('data_args', {}))
+
+
 _default_data_args = dict(
     batch_size=64
 )
 
 _default_optimizer_args = dict(
-    learning_rate=1e-4,
+    learning_rate=1e-3,
     beta1=0.5
 )
 
 _default_model_args = dict(
-    dim_z=100,
+    dim_z=64,
     dim_h=128,
     loss='bgan',
     loss_args=dict(use_log_Z=True)
@@ -456,7 +486,8 @@ _default_model_args = dict(
 
 _default_train_args = dict(
     epochs=100,
-    num_iter_gen=1
+    num_iter_gen=1,
+    num_iter_disc=1,
 )
 
 
@@ -482,5 +513,7 @@ if __name__ == '__main__':
     
     train_args = {}
     train_args.update(**_default_train_args)
+    config(data_args, model_args, optimizer_args, train_args,
+           config_file=args.config_file)
     
     main(data_args, optimizer_args, model_args, train_args, **kwargs)  
