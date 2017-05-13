@@ -369,29 +369,30 @@ def main(data_args, optimizer_args, model_args, train_args,
         
         for batch in train_stream.get_epoch_iterator():
             inputs = transform(np.array(batch[0], dtype=np.float32))
-            noise = lasagne.utils.floatX(
-                np.random.rand(len(inputs), model_args['dim_z']))
-
-            for i in range(train_args['num_iter_disc']):
-                d_outs = train_discriminator(noise, inputs)
-                d_outs =  dict((k, np.asarray(v)) for k, v in d_outs.items())
-                update_dict_of_lists(results, **d_outs)
-
-            for i in range(train_args['num_iter_gen']):
-                g_outs = train_generator(noise)
-                g_outs = dict((k, np.asarray(v)) for k, v in g_outs.items())
-                update_dict_of_lists(results, **g_outs)
-
-            u += 1
-            pbar.update(u)
-            if summary_updates is not None and u % summary_updates == 0:
-                result_summary = dict((k, np.mean(v)) for k, v in results.items())
-                logger.info(result_summary)
-                
-                samples = gen_fn(lasagne.utils.floatX(np.random.rand(5000, 100)))
-                samples_print = samples[0:64]
-                print_images(inverse_transform(samples_print), 8, 8,
-                             file=path.join(image_dir, prefix + '_gen_tmp.png'))
+            if inputs.shape[0] == data_args['batch_size']:
+                noise = lasagne.utils.floatX(
+                    np.random.rand(len(inputs), model_args['dim_z']))
+    
+                for i in range(train_args['num_iter_disc']):
+                    d_outs = train_discriminator(noise, inputs)
+                    d_outs =  dict((k, np.asarray(v)) for k, v in d_outs.items())
+                    update_dict_of_lists(results, **d_outs)
+    
+                for i in range(train_args['num_iter_gen']):
+                    g_outs = train_generator(noise)
+                    g_outs = dict((k, np.asarray(v)) for k, v in g_outs.items())
+                    update_dict_of_lists(results, **g_outs)
+    
+                u += 1
+                pbar.update(u)
+                if summary_updates is not None and u % summary_updates == 0:
+                    result_summary = dict((k, np.mean(v)) for k, v in results.items())
+                    logger.info(result_summary)
+                    
+                    samples = gen_fn(lasagne.utils.floatX(np.random.rand(5000, 100)))
+                    samples_print = samples[0:64]
+                    print_images(inverse_transform(samples_print), 8, 8,
+                                 file=path.join(image_dir, prefix + '_gen_tmp.png'))
 
         logger.info('Total Epoch {} of {} took {:.3f}s'.format(
             epoch + 1, train_args['epochs'], time.time() - start_time))
