@@ -31,8 +31,8 @@ import yaml
 
 lrelu = LeakyRectify(0.02)
 floatX = theano.config.floatX
-DIM_X = 64
-DIM_Y = 64
+DIM_X = 32
+DIM_Y = 32
 
 
 # ##################### UTIL #####################
@@ -175,13 +175,11 @@ class Deconv2DLayer(lasagne.layers.Layer):
         return self.nonlinearity(conved)
 
 def build_discriminator(input_var=None, dim_h=128, **kwargs):
-    layer = InputLayer(shape=(None, 3, 64, 64), input_var=input_var)
+    layer = InputLayer(shape=(None, 3, 32, 32), input_var=input_var)
     layer = Conv2DLayer(layer, dim_h, 5, stride=2, pad=2, nonlinearity=lrelu)
     layer = batch_norm(Conv2DLayer(layer, dim_h * 2, 5, stride=2, pad=2,
                                    nonlinearity=lrelu))
     layer = batch_norm(Conv2DLayer(layer, dim_h * 4, 5, stride=2, pad=2,
-                                   nonlinearity=lrelu))
-    layer = batch_norm(Conv2DLayer(layer, dim_h * 8, 5, stride=2, pad=2,
                                    nonlinearity=lrelu))
     layer = DenseLayer(layer, 1, nonlinearity=None)
     logger.debug('Discriminator output: {}' .format(layer.output_shape))
@@ -192,9 +190,8 @@ def build_generator(input_var=None, dim_z=100, dim_h=128, **kwargs):
     from lasagne.nonlinearities import tanh
 
     layer = InputLayer(shape=(None, dim_z), input_var=input_var)
-    layer = batch_norm(DenseLayer(layer, dim_h * 8 * 4 * 4))
-    layer = ReshapeLayer(layer, ([0], dim_h * 8, 4, 4))
-    layer = batch_norm(Deconv2DLayer(layer, dim_h * 4, 5, stride=2, pad=2))
+    layer = batch_norm(DenseLayer(layer, dim_h * 4 * 4 * 4))
+    layer = ReshapeLayer(layer, ([0], dim_h * 4, 4, 4))
     layer = batch_norm(Deconv2DLayer(layer, dim_h * 2, 5, stride=2, pad=2))
     layer = batch_norm(Deconv2DLayer(layer, dim_h, 5, stride=2, pad=2))
     layer = Deconv2DLayer(layer, 3, 5, stride=2, pad=2, nonlinearity=tanh)
@@ -407,6 +404,9 @@ def main(data_args, optimizer_args, model_args, train_args,
                  *lasagne.layers.get_all_param_values(generator))
 
 
+    log_file.flush()
+    log_file.close()
+
 
 def make_argument_parser():
     '''Generic experiment parser.
@@ -465,7 +465,6 @@ def config(data_args, model_args, optimizer_args, train_args,
         model_args.update(**d.get('model_args', {}))
         optimizer_args.update(**d.get('optimizer_args', {}))
         train_args.update(**d.get('train_args', {}))
-        #visualizer_args.update(**d.get('visualizer_args', {}))
         data_args.update(**d.get('data_args', {}))
 
 
