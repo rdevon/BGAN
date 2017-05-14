@@ -407,9 +407,6 @@ def main(data_args, optimizer_args, model_args, train_args,
                  *lasagne.layers.get_all_param_values(generator))
 
 
-    log_file.flush()
-    log_file.close()
-
 
 def make_argument_parser():
     '''Generic experiment parser.
@@ -468,7 +465,7 @@ def config(data_args, model_args, optimizer_args, train_args,
         model_args.update(**d.get('model_args', {}))
         optimizer_args.update(**d.get('optimizer_args', {}))
         train_args.update(**d.get('train_args', {}))
-        visualizer_args.update(**d.get('visualizer_args', {}))
+        #visualizer_args.update(**d.get('visualizer_args', {}))
         data_args.update(**d.get('data_args', {}))
 
 
