@@ -269,7 +269,7 @@ def GAN(fake_out, real_out):
 
 def main(data_args, optimizer_args, model_args, train_args,
          image_dir=None, binary_dir=None,
-         summary_updates=200, debug=False):
+         summary_updates=1000, debug=False):
       
     # DATA  
     train_stream, training_samples = load_stream(**data_args)
@@ -355,6 +355,7 @@ def main(data_args, optimizer_args, model_args, train_args,
 
     # TRAIN
     logger.info('Starting training of GAN...')
+    total_results = {}
 
     for epoch in range(train_args['epochs']):
         logger.info('Epoch: '.format(epoch))
@@ -368,15 +369,17 @@ def main(data_args, optimizer_args, model_args, train_args,
             widgets=widgets,
             maxval=(training_samples // data_args['batch_size'])).start()
         
-        for batch in train_stream.get_epoch_iterator():
-            inputs = transform(np.array(batch[0], dtype=floatX))
+
+        for batch in train_stream.get_epoch_iterator(as_dict=True):
+            inputs = transform(np.array(batch['features'], dtype=np.float32))
             if inputs.shape[0] == data_args['batch_size']:
                 noise = lasagne.utils.floatX(
                     np.random.rand(len(inputs), model_args['dim_z']))
     
                 for i in range(train_args['num_iter_disc']):
                     d_outs = train_discriminator(noise, inputs)
-                    d_outs =  dict((k, np.asarray(v)) for k, v in d_outs.items())
+                    d_outs =  dict((k, np.asarray(v))
+                        for k, v in d_outs.items())
                     update_dict_of_lists(results, **d_outs)
     
                 for i in range(train_args['num_iter_gen']):
@@ -387,17 +390,22 @@ def main(data_args, optimizer_args, model_args, train_args,
                 u += 1
                 pbar.update(u)
                 if summary_updates is not None and u % summary_updates == 0:
-                    result_summary = dict((k, np.mean(v)) for k, v in results.items())
+                    result_summary = dict((k, np.mean(v))
+                        for k, v in results.items())
                     logger.info(result_summary)
                     
                     samples = gen_fn(lasagne.utils.floatX(np.random.rand(
                         5000, model_args['dim_z'])))
                     samples_print = samples[0:64]
                     print_images(inverse_transform(samples_print), 8, 8,
-                                 file=path.join(image_dir, prefix + '_gen_tmp.png'))
+                                 file=path.join(image_dir,
+                                                prefix + '_gen_tmp.png'))
 
         logger.info('Total Epoch {} of {} took {:.3f}s'.format(
             epoch + 1, train_args['epochs'], time.time() - start_time))
+        result_summary = dict((k, np.mean(v)) for k, v in results.items())
+        logger.info(result_summary)
+        update_dict_of_lists(total_results, **result_summary)
         
         samples = gen_fn(lasagne.utils.floatX(np.random.rand(
             5000, model_args['dim_z'])))
@@ -406,7 +414,10 @@ def main(data_args, optimizer_args, model_args, train_args,
                      file=path.join(image_dir, prefix + '_gen.png'))
         np.savez(path.join(binary_dir, prefix + '_celeba_gen_params.npz'),
                  *lasagne.layers.get_all_param_values(generator))
-
+        np.savez(path.join(binary_dir, prefix + '_celeba_disc_params.npz'),
+                 *lasagne.layers.get_all_param_values(discriminator))
+        np.savez(path.join(binary_dir, prefix + '_celeba_results.npz'),
+                 **total_results)
 
 
 def make_argument_parser():
@@ -475,7 +486,7 @@ _default_data_args = dict(
 )
 
 _default_optimizer_args = dict(
-    learning_rate=1e-3,
+    learning_rate=1e-4,
     beta1=0.5
 )
 
@@ -487,7 +498,7 @@ _default_model_args = dict(
 )
 
 _default_train_args = dict(
-    epochs=100,
+    epochs=50,
     num_iter_gen=1,
     num_iter_disc=1,
 )
