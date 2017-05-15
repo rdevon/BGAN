@@ -268,7 +268,7 @@ def GAN(fake_out, real_out):
 
 def main(data_args, optimizer_args, model_args, train_args,
          image_dir=None, binary_dir=None,
-         summary_updates=200, debug=False):
+         summary_updates=1000, debug=False):
       
     # DATA  
     train_stream, training_samples = load_stream(**data_args)
@@ -354,6 +354,7 @@ def main(data_args, optimizer_args, model_args, train_args,
 
     # TRAIN
     logger.info('Starting training of GAN...')
+    total_results = {}
 
     for epoch in range(train_args['epochs']):
         logger.info('Epoch: '.format(epoch))
@@ -397,6 +398,9 @@ def main(data_args, optimizer_args, model_args, train_args,
 
         logger.info('Total Epoch {} of {} took {:.3f}s'.format(
             epoch + 1, train_args['epochs'], time.time() - start_time))
+        result_summary = dict((k, np.mean(v)) for k, v in results.items())
+        logger.info(result_summary)
+        update_dict_of_lists(total_results, **result_summary)
         
         samples = gen_fn(lasagne.utils.floatX(np.random.rand(
             5000, model_args['dim_z'])))
@@ -405,7 +409,10 @@ def main(data_args, optimizer_args, model_args, train_args,
                      file=path.join(image_dir, prefix + '_gen.png'))
         np.savez(path.join(binary_dir, prefix + '_celeba_gen_params.npz'),
                  *lasagne.layers.get_all_param_values(generator))
-
+        np.savez(path.join(binary_dir, prefix + '_celeba_disc_params.npz'),
+                 *lasagne.layers.get_all_param_values(discriminator))
+        np.savez(path.join(binary_dir, prefix + '_celeba_results.npz'),
+                 **total_results)
 
     log_file.flush()
     log_file.close()
