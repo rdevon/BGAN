@@ -30,7 +30,8 @@ import yaml
 
 
 lrelu = LeakyRectify(0.02)
-floatX = theano.config.floatX
+theano.config.floatX = 'float32'
+floatX = 'float32'
 DIM_X = 64
 DIM_Y = 64
 
@@ -274,8 +275,8 @@ def main(data_args, optimizer_args, model_args, train_args,
     train_stream, training_samples = load_stream(**data_args)
     
     # VAR
-    noise_var = T.matrix('noise')
-    input_var = T.tensor4('inputs')
+    noise_var = T.matrix('noise', dtype=floatX)
+    input_var = T.tensor4('inputs', dtype=floatX)
     log_Z = theano.shared(lasagne.utils.floatX(0.), name='log_Z')
 
     # MODELS
@@ -368,7 +369,7 @@ def main(data_args, optimizer_args, model_args, train_args,
             maxval=(training_samples // data_args['batch_size'])).start()
         
         for batch in train_stream.get_epoch_iterator():
-            inputs = transform(np.array(batch[0], dtype=np.float32))
+            inputs = transform(np.array(batch[0], dtype=floatX))
             if inputs.shape[0] == data_args['batch_size']:
                 noise = lasagne.utils.floatX(
                     np.random.rand(len(inputs), model_args['dim_z']))
