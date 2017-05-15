@@ -3,8 +3,8 @@ import celeba
 import os
 import time
 
-genlrlist = [5e-4]
-disclrlist = [5e-4]
+genlrlist = [1e-3]
+disclrlist = [1e-3]
 
 epochs = 200
 def main():
@@ -15,9 +15,9 @@ def main():
 
         current_time = time.time()
 
-        save_dir = 'celeba_new'
+        save_dir = 'celeba_BGAN2'
 
-        save_dir = os.path.join('/data/lisatmp2/hjelmdev/outs/', save_dir)
+        save_dir = os.path.join('/home/devon/Outs/', save_dir)
         binary_dir = save_dir +  '/binaries/'
         image_dir = save_dir + '/images/'
         log_dir = save_dir + '/logs'
