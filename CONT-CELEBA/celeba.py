@@ -247,14 +247,15 @@ def BGAN(fake_out, real_out, log_Z=None, use_log_Z=True):
 
 
 def LSGAN(fake_out, real_out, target=1.0):
+    logger.info('Generator target is {}'.format(target))
     generator_loss = ((fake_out - target) ** 2).mean()
-    discriminator_loss = ((real_out - 1.) ** 2).mean() + (fake_out ** 2).mean()
+    discriminator_loss = 0.5 * ((real_out - 1.) ** 2).mean() + 0.5 * (fake_out ** 2).mean()
     return generator_loss, discriminator_loss
 
 
 def WGAN(fake_out, real_out):    
-    generator_loss = fake_out.mean()
-    discriminator_loss = real_out.mean() - fake_out.mean()
+    generator_loss = -fake_out.mean()
+    discriminator_loss = -real_out.mean() + fake_out.mean()
     return generator_loss, discriminator_loss
 
 
@@ -302,7 +303,8 @@ def main(data_args, optimizer_args, model_args, train_args,
         log_Z_est = est_log_Z(fake_out)
     elif loss == 'lsgan':
         logger.info('Using LSGAN')
-        generator_loss, discriminator_loss = LSGAN(fake_out, real_out)
+        generator_loss, discriminator_loss = LSGAN(fake_out, real_out,
+                                                   **loss_args)
     elif loss == 'wgan':
         logger.info('Using WGAN')
         generator_loss, discriminator_loss = WGAN(fake_out, real_out)
@@ -371,16 +373,18 @@ def main(data_args, optimizer_args, model_args, train_args,
         for batch in train_stream.get_epoch_iterator(as_dict=True):
             inputs = transform(np.array(batch['features'], dtype=np.float32))
             if inputs.shape[0] == data_args['batch_size']:
-                noise = lasagne.utils.floatX(
-                    np.random.rand(len(inputs), model_args['dim_z']))
     
                 for i in range(train_args['num_iter_disc']):
+                    noise = lasagne.utils.floatX(
+                        np.random.rand(len(inputs), model_args['dim_z']))
                     d_outs = train_discriminator(noise, inputs)
                     d_outs =  dict((k, np.asarray(v))
                         for k, v in d_outs.items())
                     update_dict_of_lists(results, **d_outs)
     
                 for i in range(train_args['num_iter_gen']):
+                    noise = lasagne.utils.floatX(
+                        np.random.rand(len(inputs), model_args['dim_z']))
                     g_outs = train_generator(noise)
                     g_outs = dict((k, np.asarray(v)) for k, v in g_outs.items())
                     update_dict_of_lists(results, **g_outs)
@@ -484,7 +488,7 @@ _default_data_args = dict(
 )
 
 _default_optimizer_args = dict(
-    learning_rate=1e-4,
+    learning_rate=1e-3,
     beta1=0.5
 )
 
