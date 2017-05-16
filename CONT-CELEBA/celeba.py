@@ -30,7 +30,8 @@ import yaml
 
 
 lrelu = LeakyRectify(0.02)
-floatX = theano.config.floatX
+theano.config.floatX = 'float32'
+floatX = 'float32'
 DIM_X = 64
 DIM_Y = 64
 
@@ -276,8 +277,8 @@ def main(data_args, optimizer_args, model_args, train_args,
     train_stream, training_samples = load_stream(**data_args)
     
     # VAR
-    noise_var = T.matrix('noise')
-    input_var = T.tensor4('inputs')
+    noise_var = T.matrix('noise', dtype=floatX)
+    input_var = T.tensor4('inputs', dtype=floatX)
     log_Z = theano.shared(lasagne.utils.floatX(0.), name='log_Z')
 
     # MODELS
@@ -371,19 +372,26 @@ def main(data_args, optimizer_args, model_args, train_args,
             widgets=widgets,
             maxval=(training_samples // data_args['batch_size'])).start()
         
+<<<<<<< HEAD
         for batch in train_stream.get_epoch_iterator():
             if len(batch[0].shape) != 4:
                 inp = batch[1]
             else:
                 inp = batch[0]
             inputs = transform(np.array(inp, dtype=np.float32))
+=======
+
+        for batch in train_stream.get_epoch_iterator(as_dict=True):
+            inputs = transform(np.array(batch['features'], dtype=np.float32))
+>>>>>>> d228b8023d12a22328b29948a6e826398d8279b9
             if inputs.shape[0] == data_args['batch_size']:
                 noise = lasagne.utils.floatX(
                     np.random.rand(len(inputs), model_args['dim_z']))
     
                 for i in range(train_args['num_iter_disc']):
                     d_outs = train_discriminator(noise, inputs)
-                    d_outs =  dict((k, np.asarray(v)) for k, v in d_outs.items())
+                    d_outs =  dict((k, np.asarray(v))
+                        for k, v in d_outs.items())
                     update_dict_of_lists(results, **d_outs)
     
                 for i in range(train_args['num_iter_gen']):
@@ -394,14 +402,16 @@ def main(data_args, optimizer_args, model_args, train_args,
                 u += 1
                 pbar.update(u)
                 if summary_updates is not None and u % summary_updates == 0:
-                    result_summary = dict((k, np.mean(v)) for k, v in results.items())
+                    result_summary = dict((k, np.mean(v))
+                        for k, v in results.items())
                     logger.info(result_summary)
                     
                     samples = gen_fn(lasagne.utils.floatX(np.random.rand(
                         5000, model_args['dim_z'])))
                     samples_print = samples[0:64]
                     print_images(inverse_transform(samples_print), 8, 8,
-                                 file=path.join(image_dir, prefix + '_gen_tmp.png'))
+                                 file=path.join(image_dir,
+                                                prefix + '_gen_tmp.png'))
 
         logger.info('Total Epoch {} of {} took {:.3f}s'.format(
             epoch + 1, train_args['epochs'], time.time() - start_time))
@@ -488,7 +498,7 @@ _default_data_args = dict(
 )
 
 _default_optimizer_args = dict(
-    learning_rate=1e-3,
+    learning_rate=1e-4,
     beta1=0.5
 )
 
