@@ -30,8 +30,7 @@ import yaml
 
 
 lrelu = LeakyRectify(0.02)
-theano.config.floatX = 'float32'
-floatX = 'float32'
+floatX = theano.config.floatX
 DIM_X = 64
 DIM_Y = 64
 
@@ -114,11 +113,10 @@ def load_stream(batch_size=None, source=None):
 
 def transform(image):
     return np.array(image) / 127.5 - 1.  # seems like normalization
-    #return 2. * np.array(image) - 1.
-    
+
 def inverse_transform(image):
     return (np.array(image) + 1.) * 127.5
-    
+
 def print_images(images, num_x, num_y, file='./'):
     scipy.misc.imsave(file,  # current epoch No.
                       (images.reshape(num_x, num_y, 3, DIM_X, DIM_Y)
@@ -277,8 +275,8 @@ def main(data_args, optimizer_args, model_args, train_args,
     train_stream, training_samples = load_stream(**data_args)
     
     # VAR
-    noise_var = T.matrix('noise', dtype=floatX)
-    input_var = T.tensor4('inputs', dtype=floatX)
+    noise_var = T.matrix('noise')
+    input_var = T.tensor4('inputs')
     log_Z = theano.shared(lasagne.utils.floatX(0.), name='log_Z')
 
     # MODELS
@@ -502,7 +500,7 @@ _default_model_args = dict(
 )
 
 _default_train_args = dict(
-    epochs=50,
+    epochs=40,
     num_iter_gen=1,
     num_iter_disc=1,
 )
