@@ -238,6 +238,7 @@ def BGAN(fake_out, real_out, log_Z=None, use_log_Z=True):
     
     '''
     if use_log_Z:
+        logger.info('Using log Z in BGAN')
         generator_loss = ((fake_out - log_Z) ** 2).mean()
     else:
         generator_loss = (fake_out ** 2).mean()
