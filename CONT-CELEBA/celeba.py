@@ -248,8 +248,9 @@ def BGAN(fake_out, real_out, log_Z=None, use_log_Z=True):
 
 
 def LSGAN(fake_out, real_out, target=1.0):
+    logger.info('Generator target is {}'.format(target))
     generator_loss = ((fake_out - target) ** 2).mean()
-    discriminator_loss = ((real_out - 1.) ** 2).mean() + (fake_out ** 2).mean()
+    discriminator_loss = 0.5 * ((real_out - 1.) ** 2).mean() + 0.5 * (fake_out ** 2).mean()
     return generator_loss, discriminator_loss
 
 
@@ -303,7 +304,8 @@ def main(data_args, optimizer_args, model_args, train_args,
         log_Z_est = est_log_Z(fake_out)
     elif loss == 'lsgan':
         logger.info('Using LSGAN')
-        generator_loss, discriminator_loss = LSGAN(fake_out, real_out)
+        generator_loss, discriminator_loss = LSGAN(fake_out, real_out,
+                                                   **loss_args)
     elif loss == 'wgan':
         logger.info('Using WGAN')
         generator_loss, discriminator_loss = WGAN(fake_out, real_out)
