@@ -113,8 +113,8 @@ def load_stream(batch_size=None, source=None):
     return train_stream, num_train
 
 def transform(image):
-    #return np.array(image) / 127.5 - 1.  # seems like normalization
-    return 2. * np.array(image) - 1.
+    return np.array(image) / 127.5 - 1.  # seems like normalization
+    #return 2. * np.array(image) - 1.
     
 def inverse_transform(image):
     return (np.array(image) + 1.) * 127.5
@@ -372,18 +372,8 @@ def main(data_args, optimizer_args, model_args, train_args,
             widgets=widgets,
             maxval=(training_samples // data_args['batch_size'])).start()
         
-<<<<<<< HEAD
-        for batch in train_stream.get_epoch_iterator():
-            if len(batch[0].shape) != 4:
-                inp = batch[1]
-            else:
-                inp = batch[0]
-            inputs = transform(np.array(inp, dtype=np.float32))
-=======
-
         for batch in train_stream.get_epoch_iterator(as_dict=True):
             inputs = transform(np.array(batch['features'], dtype=np.float32))
->>>>>>> d228b8023d12a22328b29948a6e826398d8279b9
             if inputs.shape[0] == data_args['batch_size']:
                 noise = lasagne.utils.floatX(
                     np.random.rand(len(inputs), model_args['dim_z']))
