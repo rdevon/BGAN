@@ -68,6 +68,7 @@ def set_stream_logger(verbosity):
     logger.addHandler(ch)
     logger.info('Setting logging to %s' % lstr)
 
+
 def set_file_logger(file_path):
     global logger
     fh = logging.FileHandler(file_path)
@@ -76,6 +77,7 @@ def set_file_logger(file_path):
     logger.addHandler(fh)
     fh.terminator = ''
     logger.info('Saving logs to %s' % file_path)
+
     
 def update_dict_of_lists(d_to_update, **d):
     '''Updates a dict of list with kwargs.
@@ -111,11 +113,14 @@ def load_stream(batch_size=None, source=None):
     test_stream = DataStream(test_data, iteration_scheme=test_scheme)
     return train_stream, num_train
 
+
 def transform(image):
     return np.array(image) / 127.5 - 1.  # seems like normalization
 
+
 def inverse_transform(image):
     return (np.array(image) + 1.) * 127.5
+
 
 def print_images(images, num_x, num_y, file='./'):
     scipy.misc.imsave(file,  # current epoch No.
@@ -174,6 +179,7 @@ class Deconv2DLayer(lasagne.layers.Layer):
             conved += self.b.dimshuffle('x', 0, 'x', 'x')
         return self.nonlinearity(conved)
 
+
 def build_discriminator(input_var=None, dim_h=128, **kwargs):
     layer = InputLayer(shape=(None, 3, 64, 64), input_var=input_var)
     layer = Conv2DLayer(layer, dim_h, 5, stride=2, pad=2, nonlinearity=lrelu)
@@ -186,6 +192,7 @@ def build_discriminator(input_var=None, dim_h=128, **kwargs):
     layer = DenseLayer(layer, 1, nonlinearity=None)
     logger.debug('Discriminator output: {}' .format(layer.output_shape))
     return layer
+
 
 def build_generator(input_var=None, dim_z=100, dim_h=128, **kwargs):
     from lasagne.layers import InputLayer, ReshapeLayer, DenseLayer, batch_norm
@@ -233,13 +240,17 @@ def est_log_Z(fake_out):
 
 # ##################### LOSSES #######################
 
-def BGAN(fake_out, real_out, log_Z=None, use_log_Z=True):
+def BGAN(fake_out, real_out, log_Z=None, use_log_Z=False,
+         use_cross_entropy=False):
     '''Nonlinearity of discriminator is sigmoid.
     
     '''
     if use_log_Z:
         logger.info('Using log Z in BGAN')
         generator_loss = ((fake_out - log_Z) ** 2).mean()
+    elif use_cross_entropy:
+        logger.info('Using cross entropy loss in BGAN')
+        generator_loss = (T.nnet.softplus(-fake_out) + 0.5 * fake_out).mean()
     else:
         generator_loss = (fake_out ** 2).mean()
     discriminator_loss = T.nnet.softplus(-real_out).mean() + (
@@ -283,6 +294,7 @@ def main(data_args, optimizer_args, model_args, train_args,
 
     # MODELS
     logger.info('Building model and compiling GAN functions...')
+    logger.info('Model args: {}'.format(model_args))
     generator = build_generator(noise_var, **model_args)
     discriminator = build_discriminator(input_var, **model_args)
 
@@ -317,6 +329,7 @@ def main(data_args, optimizer_args, model_args, train_args,
     discriminator_params = lasagne.layers.get_all_params(
         discriminator, trainable=True)
 
+    logger.info('Training with the optimizer args {}'.format(optimizer_args))
     generator_updates = lasagne.updates.adam(
         generator_loss, generator_params, **optimizer_args)
     discriminator_updates = lasagne.updates.adam(
@@ -329,7 +342,7 @@ def main(data_args, optimizer_args, model_args, train_args,
     
     if log_Z_est is not None:
         generator_updates.update(
-            [(log_Z, 0.95 * log_Z + 0.05 * log_Z_est.mean())])
+            [(log_Z, 0.995 * log_Z + 0.005 * log_Z_est.mean())])
 
     d_results = {
         'p(real)': (real_out > 0.).mean(),
@@ -482,7 +495,6 @@ def config(data_args, model_args, optimizer_args, train_args,
         model_args.update(**d.get('model_args', {}))
         optimizer_args.update(**d.get('optimizer_args', {}))
         train_args.update(**d.get('train_args', {}))
-        #visualizer_args.update(**d.get('visualizer_args', {}))
         data_args.update(**d.get('data_args', {}))
 
 
@@ -499,7 +511,7 @@ _default_model_args = dict(
     dim_z=100,
     dim_h=128,
     loss='bgan',
-    loss_args=dict(use_log_Z=True)
+    loss_args=dict(use_log_Z=False)
 )
 
 _default_train_args = dict(
