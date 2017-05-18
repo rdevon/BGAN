@@ -68,6 +68,7 @@ def set_stream_logger(verbosity):
     logger.addHandler(ch)
     logger.info('Setting logging to %s' % lstr)
 
+
 def set_file_logger(file_path):
     global logger
     fh = logging.FileHandler(file_path)
@@ -76,6 +77,7 @@ def set_file_logger(file_path):
     logger.addHandler(fh)
     fh.terminator = ''
     logger.info('Saving logs to %s' % file_path)
+
     
 def update_dict_of_lists(d_to_update, **d):
     '''Updates a dict of list with kwargs.
@@ -111,11 +113,14 @@ def load_stream(batch_size=None, source=None):
     test_stream = DataStream(test_data, iteration_scheme=test_scheme)
     return train_stream, num_train
 
+
 def transform(image):
     return np.array(image) / 127.5 - 1.  # seems like normalization
 
+
 def inverse_transform(image):
     return (np.array(image) + 1.) * 127.5
+
 
 def print_images(images, num_x, num_y, file='./'):
     scipy.misc.imsave(file,  # current epoch No.
@@ -337,7 +342,7 @@ def main(data_args, optimizer_args, model_args, train_args,
     
     if log_Z_est is not None:
         generator_updates.update(
-            [(log_Z, 0.95 * log_Z + 0.05 * log_Z_est.mean())])
+            [(log_Z, 0.995 * log_Z + 0.005 * log_Z_est.mean())])
 
     d_results = {
         'p(real)': (real_out > 0.).mean(),
@@ -503,7 +508,7 @@ _default_optimizer_args = dict(
 )
 
 _default_model_args = dict(
-    dim_z=64,
+    dim_z=100,
     dim_h=128,
     loss='bgan',
     loss_args=dict(use_log_Z=False)
@@ -512,7 +517,7 @@ _default_model_args = dict(
 _default_train_args = dict(
     epochs=40,
     num_iter_gen=1,
-    num_iter_disc=2,
+    num_iter_disc=1,
 )
 
 
