@@ -29,7 +29,7 @@ import scipy.misc
 import yaml
 
 
-lrelu = LeakyRectify(0.02)
+lrelu = LeakyRectify(0.2)
 floatX = theano.config.floatX
 DIM_X = 64
 DIM_Y = 64
@@ -491,21 +491,21 @@ _default_data_args = dict(
 )
 
 _default_optimizer_args = dict(
-    learning_rate=1e-4,
+    learning_rate=1e-3,
     beta1=0.5
 )
 
 _default_model_args = dict(
-    dim_z=64,
+    dim_z=100,
     dim_h=128,
     loss='bgan',
     loss_args=dict(use_log_Z=True)
 )
 
 _default_train_args = dict(
-    epochs=40,
+    epochs=100,
     num_iter_gen=1,
-    num_iter_disc=1,
+    num_iter_disc=2,
 )
 
 
