@@ -235,7 +235,7 @@ def est_log_Z(fake_out):
 
 # ##################### LOSSES #######################
 
-def BGAN(fake_out, real_out, log_Z=None, use_log_Z=True,
+def BGAN(fake_out, real_out, log_Z=None, use_log_Z=False,
          use_cross_entropy=False):
     '''Nonlinearity of discriminator is sigmoid.
     
