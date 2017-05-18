@@ -174,6 +174,7 @@ class Deconv2DLayer(lasagne.layers.Layer):
             conved += self.b.dimshuffle('x', 0, 'x', 'x')
         return self.nonlinearity(conved)
 
+
 def build_discriminator(input_var=None, dim_h=128, **kwargs):
     layer = InputLayer(shape=(None, 3, 64, 64), input_var=input_var)
     layer = Conv2DLayer(layer, dim_h, 5, stride=2, pad=2, nonlinearity=lrelu)
@@ -186,6 +187,7 @@ def build_discriminator(input_var=None, dim_h=128, **kwargs):
     layer = DenseLayer(layer, 1, nonlinearity=None)
     logger.debug('Discriminator output: {}' .format(layer.output_shape))
     return layer
+
 
 def build_generator(input_var=None, dim_z=100, dim_h=128, **kwargs):
     from lasagne.layers import InputLayer, ReshapeLayer, DenseLayer, batch_norm
@@ -233,13 +235,17 @@ def est_log_Z(fake_out):
 
 # ##################### LOSSES #######################
 
-def BGAN(fake_out, real_out, log_Z=None, use_log_Z=True):
+def BGAN(fake_out, real_out, log_Z=None, use_log_Z=True,
+         use_cross_entropy=False):
     '''Nonlinearity of discriminator is sigmoid.
     
     '''
     if use_log_Z:
         logger.info('Using log Z in BGAN')
         generator_loss = ((fake_out - log_Z) ** 2).mean()
+    elif use_cross_entropy:
+        logger.info('Using cross entropy loss in BGAN')
+        generator_loss = (T.nnet.softplus(-fake_out) + 0.5 * fake_out).mean()
     else:
         generator_loss = (fake_out ** 2).mean()
     discriminator_loss = T.nnet.softplus(-real_out).mean() + (
@@ -250,7 +256,8 @@ def BGAN(fake_out, real_out, log_Z=None, use_log_Z=True):
 def LSGAN(fake_out, real_out, target=1.0):
     logger.info('Generator target is {}'.format(target))
     generator_loss = ((fake_out - target) ** 2).mean()
-    discriminator_loss = 0.5 * ((real_out - 1.) ** 2).mean() + 0.5 * (fake_out ** 2).mean()
+    discriminator_loss = 0.5 * ((real_out - 1.) ** 2).mean() + 0.5 * (
+        fake_out ** 2).mean()
     return generator_loss, discriminator_loss
 
 
@@ -282,6 +289,7 @@ def main(data_args, optimizer_args, model_args, train_args,
 
     # MODELS
     logger.info('Building model and compiling GAN functions...')
+    logger.info('Model args: {}'.format(model_args))
     generator = build_generator(noise_var, **model_args)
     discriminator = build_discriminator(input_var, **model_args)
 
@@ -316,6 +324,7 @@ def main(data_args, optimizer_args, model_args, train_args,
     discriminator_params = lasagne.layers.get_all_params(
         discriminator, trainable=True)
 
+    logger.info('Training with the optimizer args {}'.format(optimizer_args))
     generator_updates = lasagne.updates.adam(
         generator_loss, generator_params, **optimizer_args)
     discriminator_updates = lasagne.updates.adam(
@@ -480,7 +489,6 @@ def config(data_args, model_args, optimizer_args, train_args,
         model_args.update(**d.get('model_args', {}))
         optimizer_args.update(**d.get('optimizer_args', {}))
         train_args.update(**d.get('train_args', {}))
-        #visualizer_args.update(**d.get('visualizer_args', {}))
         data_args.update(**d.get('data_args', {}))
 
 
@@ -497,13 +505,13 @@ _default_model_args = dict(
     dim_z=64,
     dim_h=128,
     loss='bgan',
-    loss_args=dict(use_log_Z=True)
+    loss_args=dict(use_log_Z=False)
 )
 
 _default_train_args = dict(
     epochs=40,
     num_iter_gen=1,
-    num_iter_disc=1,
+    num_iter_disc=2,
 )
 
 
