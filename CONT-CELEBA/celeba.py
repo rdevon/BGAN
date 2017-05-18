@@ -337,7 +337,7 @@ def main(data_args, optimizer_args, model_args, train_args,
     
     if log_Z_est is not None:
         generator_updates.update(
-            [(log_Z, 0.995 * log_Z + 0.005 * log_Z_est.mean())])
+            [(log_Z, 0.95 * log_Z + 0.05 * log_Z_est.mean())])
 
     d_results = {
         'p(real)': (real_out > 0.).mean(),
@@ -367,7 +367,8 @@ def main(data_args, optimizer_args, model_args, train_args,
     # TRAIN
     logger.info('Starting training of GAN...')
     total_results = {}
-
+    exp_name = binary_dir.split('/')[-2]
+    
     for epoch in range(train_args['epochs']):
         logger.info('Epoch: '.format(epoch))
         u = 0
@@ -375,7 +376,7 @@ def main(data_args, optimizer_args, model_args, train_args,
         prefix = 'ep_{}'.format(epoch)
         
         results = {}
-        widgets = ['Epoch {}, '.format(epoch), Timer(), Bar()]
+        widgets = ['Epoch {} ({}), '.format(epoch, exp_name), Timer(), Bar()]
         pbar = ProgressBar(
             widgets=widgets,
             maxval=(training_samples // data_args['batch_size'])).start()
@@ -497,7 +498,7 @@ _default_data_args = dict(
 )
 
 _default_optimizer_args = dict(
-    learning_rate=1e-3,
+    learning_rate=1e-4,
     beta1=0.5
 )
 
