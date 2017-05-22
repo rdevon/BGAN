@@ -209,6 +209,7 @@ def log_sum_exp(x, axis=None):
     y = T.log(T.sum(T.exp(x - x_max), axis=axis, keepdims=True)) + x_max
     y = T.sum(y, axis=axis)
     return y
+
 def norm_exp(log_factor):
     '''Gets normalized weights.
     '''
@@ -217,6 +218,7 @@ def norm_exp(log_factor):
     log_w    = log_factor - T.shape_padleft(w_norm)
     w_tilde  = T.exp(log_w)
     return w_tilde
+
 def reweighted_loss(fake_out):
     log_d1 = -T.nnet.softplus(-fake_out)  # -D_cell.neg_log_prob(1., P=d)
     log_d0 = -fake_out - T.nnet.softplus(-fake_out)  # -D_cell.neg_log_prob(0., P=d)

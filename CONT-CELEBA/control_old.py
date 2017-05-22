@@ -3,8 +3,8 @@ import celeba_old as celeba
 import os
 import time
 
-genlrlist = [1e-3]
-disclrlist = [1e-3]
+genlrlist = [1e-4]
+disclrlist = [1e-4]
 
 epochs = 200
 def main():
@@ -15,7 +15,7 @@ def main():
 
         current_time = time.time()
 
-        save_dir = 'celeba_testagain'
+        save_dir = 'celeba_testagain_bgan_0.0001'
 
         save_dir = os.path.join('/home/devon/Outs/', save_dir)
         binary_dir = save_dir +  '/binaries/'

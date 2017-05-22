@@ -31,8 +31,8 @@ import yaml
 
 lrelu = LeakyRectify(0.02)
 floatX = theano.config.floatX
-DIM_X = 32
-DIM_Y = 32
+DIM_X = 64
+DIM_Y = 64
 
 
 # ##################### UTIL #####################
@@ -175,11 +175,21 @@ class Deconv2DLayer(lasagne.layers.Layer):
         return self.nonlinearity(conved)
 
 def build_discriminator(input_var=None, dim_h=128, **kwargs):
-    layer = InputLayer(shape=(None, 3, 32, 32), input_var=input_var)
+    layer = InputLayer(shape=(None, 3, 64, 64), input_var=input_var)
     layer = Conv2DLayer(layer, dim_h, 5, stride=2, pad=2, nonlinearity=lrelu)
-    layer = batch_norm(Conv2DLayer(layer, dim_h * 2, 5, stride=2, pad=2,
+    layer = batch_norm(Conv2DLayer(layer, dim_h * 2, 5, stride=1, pad=1,
                                    nonlinearity=lrelu))
-    layer = batch_norm(Conv2DLayer(layer, dim_h * 4, 5, stride=2, pad=2,
+    layer = batch_norm(Conv2DLayer(layer, dim_h * 3, 5, stride=1, pad=1,
+                                   nonlinearity=lrelu))
+    layer = batch_norm(Conv2DLayer(layer, dim_h * 4, 5, stride=1, pad=1,
+                                   nonlinearity=lrelu))
+    layer = batch_norm(Conv2DLayer(layer, dim_h * 5, 5, stride=1, pad=1,
+                                   nonlinearity=lrelu))
+    layer = batch_norm(Conv2DLayer(layer, dim_h * 6, 5, stride=1, pad=1,
+                                   nonlinearity=lrelu))
+    layer = batch_norm(Conv2DLayer(layer, dim_h * 7, 5, stride=1, pad=1,
+                                   nonlinearity=lrelu))
+    layer = batch_norm(Conv2DLayer(layer, dim_h * 8, 5, stride=1, pad=1,
                                    nonlinearity=lrelu))
     layer = DenseLayer(layer, 1, nonlinearity=None)
     logger.debug('Discriminator output: {}' .format(layer.output_shape))
@@ -190,9 +200,14 @@ def build_generator(input_var=None, dim_z=100, dim_h=128, **kwargs):
     from lasagne.nonlinearities import tanh
 
     layer = InputLayer(shape=(None, dim_z), input_var=input_var)
-    layer = batch_norm(DenseLayer(layer, dim_h * 4 * 4 * 4))
-    layer = ReshapeLayer(layer, ([0], dim_h * 4, 4, 4))
-    layer = batch_norm(Deconv2DLayer(layer, dim_h * 2, 5, stride=2, pad=2))
+    layer = batch_norm(DenseLayer(layer, dim_h * 8 * 4 * 4))
+    layer = ReshapeLayer(layer, ([0], dim_h * 8, 4, 4))
+    layer = batch_norm(Deconv2DLayer(layer, dim_h * 7, 5, stride=1, pad=1))
+    layer = batch_norm(Deconv2DLayer(layer, dim_h * 6, 5, stride=1, pad=1))
+    layer = batch_norm(Deconv2DLayer(layer, dim_h * 5, 5, stride=1, pad=1))
+    layer = batch_norm(Deconv2DLayer(layer, dim_h * 4, 5, stride=1, pad=1))
+    layer = batch_norm(Deconv2DLayer(layer, dim_h * 3, 5, stride=1, pad=1))
+    layer = batch_norm(Deconv2DLayer(layer, dim_h * 2, 5, stride=1, pad=1))
     layer = batch_norm(Deconv2DLayer(layer, dim_h, 5, stride=2, pad=2))
     layer = Deconv2DLayer(layer, 3, 5, stride=2, pad=2, nonlinearity=tanh)
     
@@ -351,7 +366,6 @@ def main(data_args, optimizer_args, model_args, train_args,
 
     # TRAIN
     logger.info('Starting training of GAN...')
-    total_results = {}
 
     for epoch in range(train_args['epochs']):
         logger.info('Epoch: '.format(epoch))
@@ -365,11 +379,8 @@ def main(data_args, optimizer_args, model_args, train_args,
             widgets=widgets,
             maxval=(training_samples // data_args['batch_size'])).start()
         
-        for batch in train_stream.get_epoch_iterator(as_dict=True):
-            inputs = transform(np.array(batch['features'], dtype=np.float32))
-            #print_images(inverse_transform(inputs), 8, 8,
-            #             file=path.join(image_dir, prefix + '_gen_tmp.png'))
-            #assert False
+        for batch in train_stream.get_epoch_iterator():
+            inputs = transform(np.array(batch[0], dtype=np.float32))
             if inputs.shape[0] == data_args['batch_size']:
                 noise = lasagne.utils.floatX(
                     np.random.rand(len(inputs), model_args['dim_z']))
@@ -398,9 +409,6 @@ def main(data_args, optimizer_args, model_args, train_args,
 
         logger.info('Total Epoch {} of {} took {:.3f}s'.format(
             epoch + 1, train_args['epochs'], time.time() - start_time))
-        result_summary = dict((k, np.mean(v)) for k, v in results.items())
-        logger.info(result_summary)
-        update_dict_of_lists(total_results, **result_summary)
         
         samples = gen_fn(lasagne.utils.floatX(np.random.rand(
             5000, model_args['dim_z'])))
@@ -409,10 +417,6 @@ def main(data_args, optimizer_args, model_args, train_args,
                      file=path.join(image_dir, prefix + '_gen.png'))
         np.savez(path.join(binary_dir, prefix + '_celeba_gen_params.npz'),
                  *lasagne.layers.get_all_param_values(generator))
-        np.savez(path.join(binary_dir, prefix + '_celeba_disc_params.npz'),
-                 *lasagne.layers.get_all_param_values(discriminator))
-        np.savez(path.join(binary_dir, prefix + '_celeba_results.npz'),
-                 **total_results)
 
 
     log_file.flush()

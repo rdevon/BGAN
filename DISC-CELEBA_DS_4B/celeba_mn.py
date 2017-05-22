@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+'''Multinomial quantized CelebA with BGAN.
 
+'''
 
 from __future__ import print_function
 
@@ -35,7 +37,6 @@ import scipy.misc
 
 
 floatX = theano.config.floatX
-data_name = "celeba_64.hdf5"
 lrelu = LeakyRectify(0.2)
 
 N_COLORS = 16
@@ -456,7 +457,6 @@ def main(source=None, num_epochs=None,
                 
         logger.info('Epoch {} of {} took {:.3f}s'.format(
             epoch + 1, num_epochs, time.time() - start_time))
-
 
         # And finally, we plot some generated data
         ssamples = gen_fn(lasagne.utils.floatX(

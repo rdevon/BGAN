@@ -7,9 +7,7 @@
 from __future__ import print_function
 
 import argparse
-import cPickle
 import datetime
-import gzip
 import logging
 import os
 from os import path
@@ -27,7 +25,6 @@ from lasagne.layers import (
     batch_norm, DenseLayer, GaussianNoiseLayer, InputLayer, ReshapeLayer)
 from lasagne.layers.dnn import Conv2DDNNLayer as Conv2DLayer
 from lasagne.nonlinearities import LeakyRectify, sigmoid, softmax, tanh
-from matplotlib import pylab as plt
 import numpy as np
 from PIL import Image
 from progressbar import Bar, ProgressBar, Percentage, Timer
@@ -39,8 +36,7 @@ from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 import scipy.misc
 
 
-floatX = lasagne.utils.floatX
-floatX_ = theano.config.floatX
+floatX = theano.config.floatX
 lrelu = LeakyRectify(0.2)
 
 DIM_X = 28
@@ -129,7 +125,6 @@ def iterate_minibatches(inputs, batchsize, shuffle=False):
     if shuffle:
         indices = np.arange(len(inputs))
         np.random.shuffle(indices)
-        
     for start_idx in range(0, len(inputs) - batchsize + 1, batchsize):
         if shuffle:
             excerpt = indices[start_idx:start_idx + batchsize]
@@ -210,12 +205,6 @@ def build_discriminator(input_var=None, dim_h=64):
     logger.debug('Discriminator output: {}'.format(layer.output_shape))
     return layer
 
-def build_baseline(input_var=None, dim_h=256, dim_z=100):
-    layer = InputLayer(shape=(None, dim_z), input_var=input_var)
-    layer = batch_norm(DenseLayer(layer, dim_h))
-    layer = batch_norm(DenseLayer(layer, 1))
-    return layer
-
 # ##################### MATH #######################
 
 def log_sum_exp(x, axis=None):
@@ -231,7 +220,7 @@ def norm_exp(log_factor):
     '''Gets normalized weights.
 
     '''
-    log_factor = log_factor - T.log(log_factor.shape[0]).astype(floatX_)
+    log_factor = log_factor - T.log(log_factor.shape[0]).astype(floatX)
     w_norm   = log_sum_exp(log_factor, axis=0)
     log_w    = log_factor - T.shape_padleft(w_norm)
     w_tilde  = T.exp(log_w)
@@ -242,9 +231,9 @@ def norm_exp(log_factor):
 def BGAN(discriminator, g_output_logit, n_samples, trng, batch_size=64):
     d = OrderedDict()
     R = trng.uniform(size=(n_samples, batch_size, DIM_C, DIM_X, DIM_Y),
-                     dtype=floatX_)
+                     dtype=floatX)
     g_output = T.nnet.sigmoid(g_output_logit)
-    samples = (R <= T.shape_padleft(g_output)).astype(floatX_)
+    samples = (R <= T.shape_padleft(g_output)).astype(floatX)
 
     # Create expression for passing real data through the discriminator
     D_r = lasagne.layers.get_output(discriminator)
@@ -255,11 +244,11 @@ def BGAN(discriminator, g_output_logit, n_samples, trng, batch_size=64):
     log_d1 = -T.nnet.softplus(-D_f_)
     log_d0 = -(D_f_ + T.nnet.softplus(-D_f_))
     log_w = log_d1 - log_d0
-    log_g = -((1. - samples) * T.shape_padleft(g_output_logit)
+    log_g = ((1. - samples) * T.shape_padleft(g_output_logit)
              + T.shape_padleft(T.nnet.softplus(-g_output_logit))).sum(
         axis=(2, 3, 4))
 
-    log_N = T.log(log_w.shape[0]).astype(floatX_)
+    log_N = T.log(log_w.shape[0]).astype(floatX)
     log_Z_est = log_sum_exp(log_w - log_N, axis=0)
     log_w_tilde = log_w - T.shape_padleft(log_Z_est) - log_N
     w_tilde = T.exp(log_w_tilde)
@@ -270,22 +259,6 @@ def BGAN(discriminator, g_output_logit, n_samples, trng, batch_size=64):
         T.nnet.softplus(-D_f)).mean() + D_f.mean()
     
     return generator_loss, discriminator_loss, D_r, D_f, log_Z_est, log_w, w_tilde, d
-
-
-def NVIL(discriminator, log_Z_est, g_output_logit, n_samples, trng,
-         batch_size=64):
-    R = trng.uniform(size=(n_samples, batch_size, DIM_C, DIM_X, DIM_Y),
-                     dtype=floatX_)
-    g_output = T.nnet.sigmoid(g_output_logit)
-    samples = (R <= T.shape_padleft(g_output)).astype(floatX_)
-    
-    D_r = lasagne.layers.get_output(discriminator)
-    D_f = lasagne.layers.get_output(
-        discriminator, samples.reshape((-1, DIM_C, DIM_X, DIM_Y)))
-    D_f_ = D_f.reshape((n_samples, batch_size))
-    log_w = D_f_
-    
-    
 
 # ############################## MAIN ################################
 
@@ -300,18 +273,18 @@ def summarize(results, samples, image_dir=None, prefix=''):
                    cmap='gray')
 
 def main(source=None, num_epochs=None, method=None, batch_size=None,
-         learning_rate=None, beta=None, n_samples=None,
+         learning_rate=None, beta=None,
          image_dir=None, binary_dir=None,
          dim_z=None, prior=None):
     
     # DATA
-    data = load_dataset(source=source, mode='train')
-    train_samples = data.shape[0]
+    X_train, y_train, X_val, y_val, X_test, y_test = load_dataset(source=source)
+    train_samples = X_train.shape[0]
 
     # VAR
     noise_var = T.matrix('noise')
     input_var = T.tensor4('inputs')
-    log_Z = theano.shared(floatX(0.), name='log_Z')
+    log_Z = theano.shared(lasagne.utils.floatX(0.), name='log_Z')
     
     # MODEL
     logger.info('Building model and graph')
@@ -331,7 +304,7 @@ def main(source=None, num_epochs=None, method=None, batch_size=None,
     discriminator_params = lasagne.layers.get_all_params(discriminator,
                                                          trainable=True)
     
-    eta = theano.shared(floatX(learning_rate))
+    eta = theano.shared(lasagne.utils.floatX(learning_rate))
     
     updates = lasagne.updates.adam(
         generator_loss, generator_params, learning_rate=eta, beta1=beta)
@@ -341,8 +314,8 @@ def main(source=None, num_epochs=None, method=None, batch_size=None,
 
     # COMPILE
     results = {
-        'p(real)': (T.nnet.sigmoid(D_r) > .5).mean(),
-        'p(fake': (T.nnet.sigmoid(D_f) < .5).mean(),
+        'p(real)': (T.nnet.sigmoid(real_out) > .5).mean(),
+        'p(fake': (T.nnet.sigmoid(fake_out) < .5).mean(),
         'G loss': generator_loss,
         'D loss': discriminator_loss,
         'log Z': log_Z,
@@ -359,8 +332,7 @@ def main(source=None, num_epochs=None, method=None, batch_size=None,
                                updates=updates)
 
     gen_fn = theano.function(
-        [noise_var], T.nnet.sigmoid(lasagne.layers.get_output(
-            generator, deterministic=True)))
+        [noise_var], lasagne.layers.get_output(generator, deterministic=True))
 
 # TRAIN
     logger.info('Training...')
@@ -378,32 +350,32 @@ def main(source=None, num_epochs=None, method=None, batch_size=None,
         
         start_time = time.time()
         batch0 = None
-        for batch in iterate_minibatches(data, batch_size, shuffle=True):
-            if batch0 is None: batch0 = batch
-            if batch.shape[0] == batch_size:
-                if prior == 'uniform':
-                    noise = floatX(np.random.rand(batch_size, dim_z))
-                elif prior == 'gaussian':
-                    noise = floatX(np.random.normal(size=(batch_size, dim_z)))
-                    
-                outs = train_fn(noise, batch)
-                outs = dict((k, np.asarray(v)) for k, v in outs.items())
+        for batch in iterate_minibatches(X_train, y_train, batch_size,
+                                         shuffle=True):
+            inputs, targets = batch
+            if batch0 is None: batch0 = inputs
+            
+            if prior == 'uniform':
+                noise = floatX(np.random.rand(len(inputs), dim_z))
+            elif prior == 'gaussian':
+                noise = floatX(numpy.random.normal(size=(len(inputs), dim_z)))
                 
-                update_dict_of_lists(e_results, **outs)
-                u += 1
-                pbar.update(u)
-            else:
-                logger.error('Skipped batch of size {}'.format(batch.shape))
+            outs = train_fn(noise, inputs)
+            outs = dict((k, np.asarray(v)) for k, v in outs.items())
+            
+            update_dict_of_lists(e_results, **outs)
+            u += 1
+            pbar.update(u)
             
         update_dict_of_lists(results, **e_results)
         np.savez(path.join(binary_dir, '{}_results.npz'.format(prefix)),
                  **results)
-        
+            
         try:
             if prior == 'uniform':
                 noise = floatX(np.random.rand(100, dim_z))
             elif prior == 'gaussian':
-                noise = floatX(np.random.normal(size=(100, dim_z)))
+                noise = floatX(numpy.random.normal(size=(64, dim_z)))
             samples = gen_fn(noise)
             summarize(results, samples, image_dir=image_dir,
                       prefix=prefix)
@@ -426,11 +398,11 @@ def main(source=None, num_epochs=None, method=None, batch_size=None,
     # lasagne.layers.set_all_param_values(network, param_values)
 
 _defaults = dict(
-    learning_rate=1e-4,
+    learning_rate=1e-2,
     beta=0.5,
     num_epochs=200,
     batch_size=64,
-    dim_z=50,
+    dim_z=10,
     prior='gaussian',
     n_samples=20
 )

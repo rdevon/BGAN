@@ -291,13 +291,15 @@ def train(num_epochs,
 
     # Optimizer
     generator_params = lasagne.layers.get_all_params(generator, trainable=True)
-    discriminator_params = lasagne.layers.get_all_params(discriminator, trainable=True)
+    discriminator_params = lasagne.layers.get_all_params(discriminator,
+                                                         trainable=True)
 
     generator_updates = lasagne.updates.adam(
         generator_loss, generator_params, learning_rate=gen_lr, beta1=beta_1_gen)
     generator_updates.update([(log_Z, 0.995 * log_Z + 0.005 * log_Z_est.mean())])
     discriminator_updates = lasagne.updates.adam(
-        discriminator_loss, discriminator_params, learning_rate=disc_lr, beta1=beta_1_disc)
+        discriminator_loss, discriminator_params, learning_rate=disc_lr,
+        beta1=beta_1_disc)
 
     d_results = {
         'p(real)': (real_out > 0.).mean(),
@@ -340,7 +342,7 @@ def train(num_epochs,
             inputs = transform(np.array(batch[0],dtype=np.float32))  # or batch
             noise = lasagne.utils.floatX(np.random.rand(len(inputs), dim_z))
 
-            #train_discriminator(noise, inputs)
+            train_discriminator(noise, inputs)
             disc_train_out = train_discriminator(noise, inputs)
             d_outs = disc_train_out
             update_dict_of_lists(results, **d_outs)
@@ -367,8 +369,10 @@ def train(num_epochs,
         
         samples = gen_fn(lasagne.utils.floatX(np.random.rand(5000, dim_z)))
         samples_print = samples[0:49]
-        print_images(inverse_transform(samples_print), 7, 7, file=image_dir + prefix + '_gen.png')
-        np.savez(binary_dir + prefix + '_celeba_gen_params.npz', *lasagne.layers.get_all_param_values(generator))
+        print_images(inverse_transform(samples_print), 7, 7,
+                     file=image_dir + prefix + '_gen.png')
+        np.savez(binary_dir + prefix + '_celeba_gen_params.npz',
+                 *lasagne.layers.get_all_param_values(generator))
 
 
     log_file.flush()

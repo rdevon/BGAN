@@ -1,5 +1,5 @@
 import itertools
-import celeba_mn as celeba
+import celeb_old as celeba
 import os
 import time
 
@@ -19,7 +19,7 @@ def main():
             gen_lr,
         )
 
-        save_dir = 'celeba_4b'
+        save_dir = 'celeba_4b_again'
         #save_dir = os.path.join('./save/', save_dir)
         save_dir = os.path.join('/home/devon/Outs/', save_dir)
         binary_dir = save_dir + '/binaries/'

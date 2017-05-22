@@ -212,7 +212,7 @@ def build_discriminator(input_var=None, dim_h=64):
 
 def build_baseline(input_var=None, dim_h=256, dim_z=100):
     layer = InputLayer(shape=(None, dim_z), input_var=input_var)
-    layer = batch_norm(DenseLayer(layer, dim_h))
+    layer = DenseLayer(layer, dim_h)
     layer = batch_norm(DenseLayer(layer, 1))
     return layer
 
@@ -272,7 +272,7 @@ def BGAN(discriminator, g_output_logit, n_samples, trng, batch_size=64):
     return generator_loss, discriminator_loss, D_r, D_f, log_Z_est, log_w, w_tilde, d
 
 
-def NVIL(discriminator, log_Z_est, g_output_logit, n_samples, trng,
+def NVIL(discriminator, log_Z, g_output_logit, n_samples, trng,
          batch_size=64):
     R = trng.uniform(size=(n_samples, batch_size, DIM_C, DIM_X, DIM_Y),
                      dtype=floatX_)
@@ -284,7 +284,21 @@ def NVIL(discriminator, log_Z_est, g_output_logit, n_samples, trng,
         discriminator, samples.reshape((-1, DIM_C, DIM_X, DIM_Y)))
     D_f_ = D_f.reshape((n_samples, batch_size))
     log_w = D_f_
+    log_g = -((1. - samples) * T.shape_padleft(g_output_logit)
+             + T.shape_padleft(T.nnet.softplus(-g_output_logit))).sum(
+        axis=(2, 3, 4))
     
+    log_N = T.log(log_w.shape[0]).astype(floatX_)
+    log_Z_est = log_sum_exp(log_w - log_N, axis=0)
+    log_w_tilde = log_w - T.shape_padleft(log_Z_est) - log_N
+    w_tilde = T.exp(log_w_tilde)
+    r = theano.gradient.disconnected_grad((log_w - log_Z - 1))
+    
+    generator_loss = -(r * log_g).mean()
+    discriminator_loss = (T.nnet.softplus(-D_r)).mean() + (
+        T.nnet.softplus(-D_f)).mean() + D_f.mean()
+    
+    return generator_loss, discriminator_loss, D_r, D_f, log_Z_est, log_w, w_tilde, {}
     
 
 # ############################## MAIN ################################
@@ -311,25 +325,28 @@ def main(source=None, num_epochs=None, method=None, batch_size=None,
     # VAR
     noise_var = T.matrix('noise')
     input_var = T.tensor4('inputs')
-    log_Z = theano.shared(floatX(0.), name='log_Z')
+    log_Z = theano.shared(lasagne.utils.floatX(0.), name='log_Z')
     
     # MODEL
     logger.info('Building model and graph')
     generator = build_generator(noise_var, dim_z=dim_z)
     discriminator = build_discriminator(input_var)
+    baseline = build_baseline(noise_var, dim_z=dim_z)
     
     # RNG
     trng = RandomStreams(random.randint(1, 1000000))
     
     # GRAPH / LOSS
     g_output_logit = lasagne.layers.get_output(generator)
-    generator_loss, discriminator_loss, D_r, D_f, log_Z_est, log_w, w_tilde, d = BGAN(
-        discriminator, g_output_logit, n_samples, trng)
+    generator_loss, discriminator_loss, D_r, D_f, log_Z_est, log_w, w_tilde, d = NVIL(
+        discriminator, log_Z, g_output_logit, n_samples, trng)
+    baseline_loss = ((log_Z - log_Z_est) ** 2).mean()
 
     # OPTIMIZER
     generator_params = lasagne.layers.get_all_params(generator, trainable=True)
     discriminator_params = lasagne.layers.get_all_params(discriminator,
                                                          trainable=True)
+    baseline_params = lasagne.layers.get_all_params(baseline, trainable=True)
     
     eta = theano.shared(floatX(learning_rate))
     
@@ -337,7 +354,7 @@ def main(source=None, num_epochs=None, method=None, batch_size=None,
         generator_loss, generator_params, learning_rate=eta, beta1=beta)
     updates.update(lasagne.updates.adam(
         discriminator_loss, discriminator_params, learning_rate=eta, beta1=beta))
-    updates.update([(log_Z, 0.95 * log_Z + 0.05 * log_Z_est.mean())])
+    updates.update([(log_Z, 0.995 * log_Z + 0.005 * log_Z_est.mean())])
 
     # COMPILE
     results = {
