@@ -6,7 +6,9 @@ README UNDER CONSTRUCTION...
 
 Basic instructions (in-depth instuctions forthcoming)
 
-Requirements (rough estimate):
+Requirements (rough estimate)
+-----------------------------
+
 Fuel
 Lasagne
 Theano (bleeding edge)
