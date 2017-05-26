@@ -27,7 +27,7 @@ Install MNIST:
 
 .. code-block:: bash
 
-   $ cd \<Dataset directory\>
+   $ cd <Dataset directory>
 
    $ fuel-download binarized_mnist
 
@@ -37,7 +37,7 @@ Install CelebA:
 
 .. code-block:: bash
 
-   $ cd \<Dataset directory\>
+   $ cd <Dataset directory>
 
    $ fuel-download celeba
 
@@ -49,13 +49,19 @@ For simple BGAN running on discrete MNIST:
 
 .. code-block:: bash
 
-  python main_discrete.py -o \<Output directory\> -S \<Path to MNIST hdf5\>
+  python main_discrete.py -o <Output directory` -S <Path to MNIST hdf5>
 
 For simple BGAN running on continuous CelebA:
 
 .. code-block:: bash
 
   python main_continuous.py -o <Output directory> -S <Path to CelebA hdf5>
+ 
+Basic documentation found in:
+
+.. code-block:: bash
+
+  python main_continuous.py --help
 
 **Note: Published versions of the model are available in the code, and instructions to reproduce will be added soon.**
   
