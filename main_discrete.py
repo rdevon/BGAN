@@ -1,4 +1,4 @@
-'''Main function to train continuous BGAN.
+'''Main function to train discrete BGAN.
 
 '''
 
@@ -24,7 +24,7 @@ logger = logging.getLogger('BGAN')
 
 def main(data_args=None, optimizer_args=None, model_args=None, loss_args=None,
          train_args=None):
-    '''Main function for continuous BGAN.
+    '''Main function for discrete BGAN.
     
     '''
       
@@ -124,8 +124,8 @@ if __name__ == '__main__':
         
     out_paths = setup_out_dir(args.out_path, args.name)
     kwargs['train_args'].update(**out_paths)
+    config(config_file=args.config_file, **kwargs)
     kwargs['train_args']['batch_size'] = kwargs['data_args']['batch_size']
     kwargs['train_args']['dim_z'] = kwargs['model_args']['dim_z']
-    config(config_file=args.config_file, **kwargs)
     
     main(**kwargs)  

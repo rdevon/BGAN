@@ -93,7 +93,7 @@ _default_args = dict(
         arch='dcgan_64',
         dim_z=128,
         dim_h=128,
-        leak=0.02 
+        leak=0.1
     ),
     loss_args=dict(
         loss='bgan',
@@ -125,8 +125,8 @@ if __name__ == '__main__':
         
     out_paths = setup_out_dir(args.out_path, args.name)
     kwargs['train_args'].update(**out_paths)
+    config(config_file=args.config_file, **kwargs)
     kwargs['train_args']['batch_size'] = kwargs['data_args']['batch_size']
     kwargs['train_args']['dim_z'] = kwargs['model_args']['dim_z']
-    config(config_file=args.config_file, **kwargs)
     
     main(**kwargs)  
