@@ -7,6 +7,7 @@ import logging
 import os
 from os import path
 import random
+import yaml
 
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 
