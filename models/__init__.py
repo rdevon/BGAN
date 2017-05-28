@@ -10,6 +10,8 @@ detected and used.
 
 import logging
 
+from lasagne import nonlinearities
+
 import dcgan_28_pub, dcgan_32, dcgan_32_pub, dcgan_64, dcgan_64_pub
 
 
@@ -50,7 +52,14 @@ def build_model(module, noise_var, input_var,
     if nonlinearity is not None and nonlinearity != module.NONLIN:
         logger.info('Setting nonlinearity of generator output to {}'.format(
             nonlinearity))
-        if nonlinearity == 'identity': nonlinearity = None
+        if nonlinearity == 'identity':
+            nonlinearity = None
+        else:
+            if hasattr(nonlinearities, nonlinearity):
+                nonlinearity = getattr(nonlinearities, nonlinearity)
+            else:
+                raise ValueError('Lasagne nonlinearity `{}` not found'.format(
+                    nonlinearity))
         module.NONLIN = nonlinearity
     
     generator = module.build_generator(

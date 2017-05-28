@@ -20,8 +20,10 @@ logger = logging.getLogger('BGAN.train')
 floatX_ = lasagne.utils.floatX
 floatX = theano.config.floatX
 
+ETA = None
 GENERATOR = None
 DISCRIMINATOR = None
+OPTIONS = dict()
 
 
 def summarize(summary, gen_fn, dim_z, prefix='', image_dir=None):
@@ -53,10 +55,16 @@ def save(results, prefix='', binary_dir=None):
     
 def setup(input_var, noise_var, log_Z,
           generator, discriminator, g_results, d_results, discrete=False,
-          log_Z_gamma=None, clip=None, optimizer=None, optimizer_options=None):
-    global GENERATOR, DISCRIMINATOR
+          log_Z_gamma=None, clip=None, optimizer=None,
+          learning_rate=None, lr_decay=None, min_lr=None, decay_at_epoch=None,
+          optimizer_options=None):
+    global GENERATOR, DISCRIMINATOR, OPTIONS, ETA
     GENERATOR = generator
     DISCRIMINATOR = discriminator
+    decay_at_epoch = decay_at_epoch or 0
+    min_lr = min_lr or 0.
+    OPTIONS.update(lr_decay=lr_decay, min_lr=min_lr,
+                   decay_at_epoch=decay_at_epoch)
     
     generator_loss = g_results.get('g loss', None)
     if generator_loss is None:
@@ -83,13 +91,16 @@ def setup(input_var, noise_var, log_Z,
     else:
         raise NotImplementedError('Optimizer not supported `{}`'.format(
             optimizer))
+    ETA = theano.shared(floatX_(learning_rate))
     generator_updates = op(
-        generator_loss, generator_params, **optimizer_options)
+        generator_loss, generator_params, learning_rate=ETA,
+        **optimizer_options)
     discriminator_updates = op(
-        discriminator_loss, discriminator_params, **optimizer_options)
+        discriminator_loss, discriminator_params, learning_rate=ETA,
+        **optimizer_options)
     
     if clip is not None:
-        logger.info('Clipping weights with clip of {}'.format(CLIP))
+        logger.info('Clipping weights with clip of {}'.format(clip))
         for k in discriminator_updates.keys():
             if k.name == 'W':
                 discriminator_updates[k] = T.clip(
@@ -112,7 +123,6 @@ def setup(input_var, noise_var, log_Z,
     gen_out = lasagne.layers.get_output(generator, deterministic=True)
     if discrete:
         if generator.output_shape[1] == 1:
-            print "True"
             gen_out = T.nnet.sigmoid(gen_out)
             
     gen_fn = theano.function(
@@ -189,3 +199,12 @@ def train(train_d, train_g, gen, stream,
                   image_dir=image_dir)
         make_gif(gen, z=rep_samples, prefix=exp_name, image_dir=image_dir)
         save(total_results, prefix=prefix, binary_dir=binary_dir)
+        
+        if (OPTIONS['lr_decay'] is not None
+            and epoch >= OPTIONS['decay_at_epoch']):
+            old_eta = ETA.get_value()
+            if old_eta > OPTIONS['min_lr']:
+                new_eta = old_eta * OPTIONS['lr_decay']
+                new_eta = max(new_eta, OPTIONS['min_lr'])
+                logger.debug('Setting learning rate to {}'.format(new_eta))
+                ETA.set_value(floatX_(new_eta))
