@@ -82,10 +82,8 @@ _default_args = dict(
     ),
     optimizer_args=dict(
         optimizer='adam',
-        optimizer_options=dict(
-            learning_rate=1e-4,
-            beta1=0.5
-        )
+        optimizer_options=dict(beta1=0.5),
+        learning_rate=1e-4,
     ),
     model_args=dict(
         arch='dcgan_28_pub',

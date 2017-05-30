@@ -84,16 +84,15 @@ _default_args = dict(
     ),
     optimizer_args=dict(
         optimizer='adam',
-        optimizer_options=dict(
-            learning_rate=1e-3,
-            beta1=0.5
-        )
+        optimizer_options=dict(beta1=0.5),
+        learning_rate=1e-4,
     ),
     model_args=dict(
         arch='dcgan_64',
         dim_z=128,
         dim_h=128,
-        leak=0.1
+        leak=0.2,
+        nonlinearity='tanh'
     ),
     loss_args=dict(
         loss='bgan',
