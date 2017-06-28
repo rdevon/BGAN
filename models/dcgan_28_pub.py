@@ -27,7 +27,7 @@ def build_generator(input_var=None, dim_z=100, dim_h=64):
     layer = ReshapeLayer(layer, ([0], dim_h * 2, 7, 7))
     layer = batch_norm(Deconv2DLayer(layer, dim_h, 5, stride=2, pad=2))
     layer = Deconv2DLayer(layer, DIM_C, 5, stride=2, pad=2,
-                          nonlinearity=None)
+                          nonlinearity=NONLIN)
     
     logger.debug('Generator output: {}'.format(layer.output_shape))
     return layer
@@ -48,7 +48,7 @@ def build_discriminator(input_var=None, dim_h=64, use_batch_norm=True,
     layer = bn(Conv2DLayer(layer, dim_h * 2, 5, stride=2, pad=2,
                            nonlinearity=lrelu))
     layer = DenseLayer(layer, 1024, nonlinearity=lrelu)
-    layer = DenseLayer(layer, 1, nonlinearity=NONLIN)
+    layer = DenseLayer(layer, 1, nonlinearity=None)
     
     logger.debug('Discriminator output: {}'.format(layer.output_shape))
     return layer
