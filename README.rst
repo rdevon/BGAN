@@ -49,7 +49,7 @@ For simple BGAN running on discrete MNIST:
 
 .. code-block:: bash
 
-  python main_discrete.py -o <Output directory` -S <Path to MNIST hdf5>
+  python main_discrete.py -o <Output directory -S <Path to MNIST hdf5>
 
 For simple BGAN running on continuous CelebA:
 
